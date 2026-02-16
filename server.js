@@ -4,7 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
-import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
+import { GoogleGenAI, createUserContent, createPartFromUri, createPartFromBase64 } from "@google/genai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -250,13 +250,16 @@ app.post("/api/chat", async (req, res) => {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY. Add it to .env and restart." });
   }
 
-  const { selectedGems = [], prompt } = req.body;
+  const { selectedGems = [], prompt, attachments: rawAttachments } = req.body;
   if (!Array.isArray(selectedGems) || selectedGems.length === 0) {
     return res.status(400).json({ error: "Select at least one Gem." });
   }
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-    return res.status(400).json({ error: "Prompt is required." });
+  const promptText = typeof prompt === "string" ? prompt.trim() : "";
+  const hasAttachments = Array.isArray(rawAttachments) && rawAttachments.length > 0;
+  if (!promptText && !hasAttachments) {
+    return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
+  const userPrompt = promptText || "(The user sent the following files with no additional text.)";
 
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const results = [];
@@ -274,23 +277,26 @@ app.post("/api/chat", async (req, res) => {
     }
   }
 
+  const attachmentParts = [];
+  if (hasAttachments) {
+    for (const a of rawAttachments) {
+      if (a && typeof a.data === "string" && a.mimeType) {
+        attachmentParts.push(createPartFromBase64(a.data, a.mimeType));
+      }
+    }
+  }
+
   await Promise.all(
     gemConfigs.map(async (gem) => {
       try {
         const docPaths = Array.isArray(gem.documents) ? gem.documents : [];
-        let contents;
-        if (docPaths.length > 0) {
-          const fileParts = [];
-          for (const rel of docPaths) {
-            const u = uploadedDocs.get(rel);
-            if (u) fileParts.push(createPartFromUri(u.uri, u.mimeType));
-          }
-          contents = fileParts.length > 0
-            ? createUserContent([...fileParts, prompt.trim()])
-            : prompt.trim();
-        } else {
-          contents = prompt.trim();
+        const fileParts = [];
+        for (const rel of docPaths) {
+          const u = uploadedDocs.get(rel);
+          if (u) fileParts.push(createPartFromUri(u.uri, u.mimeType));
         }
+        const allParts = [...attachmentParts, ...fileParts, userPrompt];
+        const contents = allParts.length > 1 ? createUserContent(allParts) : userPrompt;
         const response = await ai.models.generateContent({
           model: gem.model,
           contents,
