@@ -16,9 +16,6 @@ const sendToCancel = document.getElementById("sendToCancel");
 const sendToConfirm = document.getElementById("sendToConfirm");
 const councilLoading = document.getElementById("councilLoading");
 const councilLoadingMessage = document.getElementById("councilLoadingMessage");
-const fileInput = document.getElementById("fileInput");
-const uploadBtn = document.getElementById("uploadBtn");
-const attachmentsList = document.getElementById("attachmentsList");
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
@@ -57,7 +54,6 @@ let lastSelectedGems = [];
 let lastResults = [];
 let sendToSource = null; // { gemId, name, response } when overlay is open
 let sendToSelectedIds = new Set();
-let attachments = []; // { name, mimeType, data (base64) }
 
 // Phase 1: Jane only. 2: Jane, Carl, Henrietta. 3: + Wolfgang. 4: all.
 function getEnabledMemberIds(phase) {
@@ -72,7 +68,7 @@ function getEnabledMemberIds(phase) {
 
 function getProjectPhase() {
   const r = document.querySelector('input[name="projectPhase"]:checked');
-  return r ? r.value : "1";
+  return r ? r.value : "4";
 }
 
 function setStatus(message, type = "") {
@@ -83,8 +79,7 @@ function setStatus(message, type = "") {
 function setSubmitState() {
   const hasSelection = selectedIds.size > 0;
   const hasPrompt = promptInput.value.trim().length > 0;
-  const hasAttachments = attachments.length > 0;
-  submitBtn.disabled = !hasSelection || (!hasPrompt && !hasAttachments);
+  submitBtn.disabled = !hasSelection || !hasPrompt;
   selectionHint.textContent = hasSelection
     ? `${selectedIds.size} member${selectedIds.size === 1 ? "" : "s"} selected`
     : "Select at least one member";
@@ -135,46 +130,6 @@ function escapeHtml(s) {
   const div = document.createElement("div");
   div.textContent = s;
   return div.innerHTML;
-}
-
-const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf"];
-function isAllowedFile(file) {
-  return ALLOWED_MIME_PREFIXES.some((p) => file.type && file.type.startsWith(p)) || /\.(pdf|txt|md)$/i.test(file.name);
-}
-
-function renderAttachments() {
-  if (attachments.length === 0) {
-    attachmentsList.hidden = true;
-    attachmentsList.innerHTML = "";
-    return;
-  }
-  attachmentsList.hidden = false;
-  attachmentsList.innerHTML = attachments
-    .map(
-      (a, i) =>
-        `<span class="attachment-tag">${escapeHtml(a.name)} <button type="button" class="attachment-remove" data-index="${i}" aria-label="Remove">×</button></span>`
-    )
-    .join("");
-  attachmentsList.querySelectorAll(".attachment-remove").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      attachments.splice(Number(btn.dataset.index), 1);
-      renderAttachments();
-      setSubmitState();
-    });
-  });
-  setSubmitState();
-}
-
-function readFileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const data = (reader.result || "").replace(/^data:[^;]+;base64,/, "");
-      resolve({ name: file.name, mimeType: file.type || "application/octet-stream", data });
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 function renderResults(results, options = {}) {
@@ -299,9 +254,7 @@ function confirmSendTo() {
     closeSendToOverlay();
     return;
   }
-  const sourceGemId = sendToSource.gemId;
   const prompt = sendToSource.response;
-  const selectedIdsForRequest = Array.from(sendToSelectedIds);
   sendToConfirm.disabled = true;
   closeSendToOverlay();
   setStatus("");
@@ -311,7 +264,7 @@ function confirmSendTo() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt,
-      selectedGems: selectedIdsForRequest,
+      selectedGems: Array.from(sendToSelectedIds),
     }),
   })
     .then((r) => r.json())
@@ -321,7 +274,7 @@ function confirmSendTo() {
       gems.forEach((g) => { jobTitleMap[g.name] = g.jobTitle; });
       const followUpsByGemId = {};
       const withTitles = data.results.map((r) => ({ ...r, jobTitle: jobTitleMap[r.name] || r.jobTitle }));
-      followUpsByGemId[sourceGemId] = withTitles;
+      followUpsByGemId[sendToSource.gemId] = withTitles;
       renderResults(lastResults, {
         showSaveButton: true,
         jobTitleMap,
@@ -406,8 +359,7 @@ recentChatsDropdown.addEventListener("click", (e) => e.stopPropagation());
 
 async function submit() {
   const prompt = promptInput.value.trim();
-  if (selectedIds.size === 0) return;
-  if (!prompt && attachments.length === 0) return;
+  if (!prompt || selectedIds.size === 0) return;
 
   submitBtn.classList.add("loading");
   submitBtn.disabled = true;
@@ -416,15 +368,13 @@ async function submit() {
   startCouncilLoading();
 
   try {
-    const body = {
-      selectedGems: Array.from(selectedIds),
-      prompt: prompt || "(See attached files.)",
-      attachments: attachments.length > 0 ? attachments.map((a) => ({ name: a.name, mimeType: a.mimeType, data: a.data })) : undefined,
-    };
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        selectedGems: Array.from(selectedIds),
+        prompt,
+      }),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -434,11 +384,9 @@ async function submit() {
       return;
     }
 
-    lastPrompt = prompt || "(Attached files)";
+    lastPrompt = prompt;
     lastSelectedGems = Array.from(selectedIds);
     lastResults = data.results || [];
-    attachments = [];
-    renderAttachments();
     const jobTitleMap = {};
     gems.forEach((g) => { jobTitleMap[g.name] = g.jobTitle; });
     lastResults.forEach((r) => { r.jobTitle = jobTitleMap[r.name] || r.jobTitle; });
@@ -483,21 +431,6 @@ function onPhaseChange() {
 
 document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
   radio.addEventListener("change", onPhaseChange);
-});
-
-uploadBtn.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", async () => {
-  const files = Array.from(fileInput.files || []).filter(isAllowedFile);
-  fileInput.value = "";
-  for (const file of files) {
-    try {
-      const a = await readFileAsBase64(file);
-      attachments.push(a);
-    } catch (err) {
-      setStatus("Could not read file: " + file.name, "error");
-    }
-  }
-  renderAttachments();
 });
 
 promptInput.addEventListener("input", setSubmitState);

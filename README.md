@@ -39,14 +39,18 @@ Simple web app to select 1–5 Gemini “Gems” (custom-style assistants), send
 
 1. Push this project to GitHub (or connect another Git provider to Vercel).
 
-2. In [Vercel](https://vercel.com), click **Add New** → **Project**, import the repo, and leave the default build settings (no custom build command).
+2. In [Vercel](https://vercel.com), click **Add New** → **Project**, import the repo.
 
-3. In **Environment Variables**, add:
+3. **Build settings:** Set **Build Command** to `npm run build` (copies `public/` to root so `/` is served). Leave **Output Directory** empty.
+
+4. In **Environment Variables**, add:
    - **Name:** `GEMINI_API_KEY`  
    - **Value:** your Gemini API key  
    (Optionally add `GOOGLE_API_KEY` if you use that name.)
 
-4. Deploy. Vercel will serve the `public/` folder at the root and run the API from `api/index.js`. Your `documents/` folder is included in the deployment so the council can use the uploaded files.
+5. Deploy. Only `/api/*` hits the serverless function; `/` and static assets are served from the root. Your `documents/` folder is included so the council can use the uploaded files.
+
+**If you still see "Cannot GET /":** Visit **https://your-app.vercel.app/api/debug** to see what path the function receives. In Vercel → Project → Deployments → Functions → Logs, check for errors.
 
 **Note:** Recent Chats are stored in memory and will not persist across serverless invocations. For persistent saved chats you’d add a small database (e.g. Vercel KV). The free plan may limit function duration to 10 seconds; if requests time out with many documents, consider the Pro plan or reducing the number of documents per request.
 
