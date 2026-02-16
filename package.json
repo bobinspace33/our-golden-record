@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "build": "node scripts/copy-public-to-root.js"
   },
   "dependencies": {
     "@google/genai": "^1.41.0",
