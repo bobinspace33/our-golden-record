@@ -9,15 +9,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// On Vercel, all /api/* requests are rewritten to /api?__path=:path so the single serverless function handles them. Restore req.url so Express routes match.
+// On Vercel, ALL requests are rewritten to /api?__path=... so the single function handles both API and static. Restore req.url.
 if (process.env.VERCEL) {
+  const API_SEGMENTS = new Set(["gems", "chat", "chats"]);
   app.use((req, res, next) => {
-    const pathSeg = req.query.__path;
-    if (pathSeg !== undefined && pathSeg !== "") {
-      req.url = "/api/" + (Array.isArray(pathSeg) ? pathSeg[0] : pathSeg);
-      delete req.query.__path;
-    } else if (req.url === "/api" || req.url === "/api/") {
-      req.url = "/api";
+    const raw = req.query.__path;
+    const pathSeg = raw === undefined ? "" : Array.isArray(raw) ? raw[0] : raw;
+    delete req.query.__path;
+    if (pathSeg === "") {
+      req.url = "/";
+    } else if (API_SEGMENTS.has(pathSeg) || pathSeg.startsWith("chats/")) {
+      req.url = "/api/" + pathSeg;
+    } else {
+      req.url = "/" + pathSeg;
     }
     next();
   });
