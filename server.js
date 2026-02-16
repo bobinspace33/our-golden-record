@@ -9,19 +9,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// On Vercel, all requests are rewritten to /api or /api/:path. Restore path for root and static files so express.static and routes work.
+// On Vercel, all /api/* requests are rewritten to /api?__path=:path so the single serverless function handles them. Restore req.url so Express routes match.
 if (process.env.VERCEL) {
   app.use((req, res, next) => {
-    if (req.url === "/api" || req.url === "/api/") {
-      req.url = "/";
-    } else if (req.url.startsWith("/api/")) {
-      const sub = req.url.slice(5);
-      const isApiRoute =
-        sub === "gems" ||
-        sub === "chat" ||
-        sub === "chats" ||
-        sub.startsWith("chats/");
-      if (!isApiRoute) req.url = "/" + sub;
+    const pathSeg = req.query.__path;
+    if (pathSeg !== undefined && pathSeg !== "") {
+      req.url = "/api/" + (Array.isArray(pathSeg) ? pathSeg[0] : pathSeg);
+      delete req.query.__path;
+    } else if (req.url === "/api" || req.url === "/api/") {
+      req.url = "/api";
     }
     next();
   });
