@@ -29,6 +29,20 @@ if (process.env.VERCEL) {
 
 app.use(express.static("public"));
 
+// Debug: see what path Vercel sends (visit /api/debug or hit / and check logs)
+app.get("/api/debug", (req, res) => {
+  res.json({
+    url: req.url,
+    originalUrl: req.originalUrl,
+    path: req.path,
+    "x-vercel-id": req.headers["x-vercel-id"],
+    "x-invoke-path": req.headers["x-invoke-path"],
+    "x-real-url": req.headers["x-real-url"],
+    cwd: process.cwd(),
+    vercel: !!process.env.VERCEL,
+  });
+});
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 const PORT = process.env.PORT || 3000;
 
