@@ -311,8 +311,40 @@ h2 {
   opacity: 0.8;
 }
 
-.submit-btn {
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.85rem 1.25rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.upload-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-active);
+}
+
+.upload-icon {
+  flex-shrink: 0;
+}
+
+.submit-btn {
   padding: 0.85rem 1.5rem;
   background: var(--accent);
   color: #fff;
@@ -338,6 +370,41 @@ h2 {
 .submit-btn.loading {
   pointer-events: none;
   opacity: 0.8;
+}
+
+.attachments-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.attachment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.attachment-remove {
+  padding: 0 0.2rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.attachment-remove:hover {
+  color: var(--error);
+  background: rgba(255, 107, 107, 0.15);
 }
 
 .results-section {

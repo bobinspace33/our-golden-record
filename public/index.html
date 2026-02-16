@@ -28,10 +28,10 @@
     <section class="phase-section">
       <span class="phase-label">Project Phase</span>
       <div class="phase-options" role="group" aria-label="Project Phase">
-        <label class="phase-option"><input type="radio" name="projectPhase" value="1" /> 1</label>
+        <label class="phase-option"><input type="radio" name="projectPhase" value="1" checked /> 1</label>
         <label class="phase-option"><input type="radio" name="projectPhase" value="2" /> 2</label>
         <label class="phase-option"><input type="radio" name="projectPhase" value="3" /> 3</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="4" checked /> 4</label>
+        <label class="phase-option"><input type="radio" name="projectPhase" value="4" /> 4</label>
       </div>
     </section>
 
@@ -50,9 +50,17 @@
         placeholder="Ask something… all selected members will answer."
         rows="4"
       ></textarea>
-      <button type="button" class="submit-btn" id="submitBtn" disabled>
-        Send to selected members
-      </button>
+      <div class="prompt-actions">
+        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,text/*" multiple hidden />
+        <button type="button" class="upload-btn" id="uploadBtn" title="Attach images, PDF, or text">
+          <svg class="upload-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload
+        </button>
+        <button type="button" class="submit-btn" id="submitBtn" disabled>
+          Send to selected members
+        </button>
+      </div>
+      <div class="attachments-list" id="attachmentsList" hidden></div>
     </section>
 
     <section class="results-section" id="resultsSection" hidden>
