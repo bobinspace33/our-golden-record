@@ -8,6 +8,25 @@ import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// On Vercel, all requests are rewritten to /api or /api/:path. Restore path for root and static files so express.static and routes work.
+if (process.env.VERCEL) {
+  app.use((req, res, next) => {
+    if (req.url === "/api" || req.url === "/api/") {
+      req.url = "/";
+    } else if (req.url.startsWith("/api/")) {
+      const sub = req.url.slice(5);
+      const isApiRoute =
+        sub === "gems" ||
+        sub === "chat" ||
+        sub === "chats" ||
+        sub.startsWith("chats/");
+      if (!isApiRoute) req.url = "/" + sub;
+    }
+    next();
+  });
+}
+
 app.use(express.static("public"));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
