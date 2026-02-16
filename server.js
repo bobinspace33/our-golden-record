@@ -1,9 +1,13 @@
 import "dotenv/config";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 const app = express();
 app.use(cors());
@@ -27,7 +31,17 @@ if (process.env.VERCEL) {
   });
 }
 
-app.use(express.static("public"));
+app.use(express.static(PUBLIC_DIR));
+
+// Explicit root so "/" always serves the app (reliable on Vercel serverless)
+app.get("/", (req, res) => {
+  const indexPath = path.join(PUBLIC_DIR, "index.html");
+  if (fs.existsSync(indexPath)) {
+    res.type("html").sendFile(indexPath);
+  } else {
+    res.status(404).send("Not found");
+  }
+});
 
 // Debug: see what path Vercel sends (visit /api/debug or hit / and check logs)
 app.get("/api/debug", (req, res) => {
