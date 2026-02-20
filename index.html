@@ -28,10 +28,10 @@
     <section class="phase-section">
       <span class="phase-label">Project Phase</span>
       <div class="phase-options" role="group" aria-label="Project Phase">
-        <label class="phase-option"><input type="radio" name="projectPhase" value="1" /> 1</label>
+        <label class="phase-option"><input type="radio" name="projectPhase" value="1" checked /> 1</label>
         <label class="phase-option"><input type="radio" name="projectPhase" value="2" /> 2</label>
         <label class="phase-option"><input type="radio" name="projectPhase" value="3" /> 3</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="4" checked /> 4</label>
+        <label class="phase-option"><input type="radio" name="projectPhase" value="4" /> 4</label>
       </div>
     </section>
 
@@ -48,17 +48,47 @@
       <textarea
         id="promptInput"
         placeholder="Ask something… all selected members will answer."
-        rows="4"
+        rows="2"
       ></textarea>
-      <button type="button" class="submit-btn" id="submitBtn" disabled>
-        Send to selected members
-      </button>
+      <div class="prompt-actions">
+        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,text/*" multiple hidden />
+        <button type="button" class="upload-btn" id="uploadBtn" title="Attach images, PDF, or text">
+          <svg class="upload-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload
+        </button>
+        <button type="button" class="submit-btn" id="submitBtn" disabled>
+          Send to selected members
+        </button>
+        <button type="button" class="return-to-response-btn" id="returnToResponseBtn" hidden>
+          Return to Response
+        </button>
+      </div>
+      <div class="attachments-list" id="attachmentsList" hidden></div>
     </section>
 
     <section class="results-section" id="resultsSection" hidden>
       <h2>Responses</h2>
       <div class="results-list" id="resultsList"></div>
     </section>
+
+  <div class="overlay responses-overlay" id="responsesOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="responsesOverlayTitle">
+    <div class="responses-overlay-backdrop" id="responsesOverlayBackdrop"></div>
+    <div class="responses-overlay-panel">
+      <div class="responses-overlay-header">
+        <h2 class="responses-overlay-title" id="responsesOverlayTitle">Council responses</h2>
+        <button type="button" class="responses-overlay-close" id="responsesOverlayClose" aria-label="Close">×</button>
+      </div>
+      <div class="responses-overlay-grid" id="responsesOverlayGrid"></div>
+      <div class="follow-up-prompt-box" id="followUpPromptBox" hidden>
+        <label for="followUpInput" class="follow-up-prompt-label">Ask a follow-up question to this member</label>
+        <textarea id="followUpInput" rows="2" placeholder="Type your follow-up question…"></textarea>
+        <div class="follow-up-prompt-actions">
+          <button type="button" class="btn-secondary" id="followUpCancel">Cancel</button>
+          <button type="button" class="submit-btn" id="followUpSend">Send follow-up</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
     <div class="council-loading" id="councilLoading" hidden aria-live="polite">
       <div class="council-loading-spinner"></div>
