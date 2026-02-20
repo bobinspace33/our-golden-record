@@ -158,6 +158,25 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
+function responseToHtml(text) {
+  if (text == null || text === "") return "";
+  const urlRe = /(https?:\/\/[^\s]+?)([.,;:)\]\s]|$)/g;
+  let html = "";
+  let lastIndex = 0;
+  let m;
+  while ((m = urlRe.exec(text)) !== null) {
+    const before = text.slice(lastIndex, m.index);
+    if (before) html += escapeHtml(before);
+    const url = m[1];
+    const suffix = m[2];
+    html += '<a class="response-text-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + "</a>";
+    if (suffix) html += escapeHtml(suffix);
+    lastIndex = urlRe.lastIndex;
+  }
+  if (lastIndex < text.length) html += escapeHtml(text.slice(lastIndex));
+  return html || escapeHtml(text);
+}
+
 const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf"];
 function isAllowedFile(file) {
   return ALLOWED_MIME_PREFIXES.some((p) => file.type && file.type.startsWith(p)) || /\.(pdf|txt|md)$/i.test(file.name);
@@ -208,7 +227,7 @@ function tokenizeLineForFormatting(line) {
     if (/^\*\*[^*]+\*\*$/.test(seg)) {
       tokens.push({ type: "word", text: seg.slice(2, -2), bold: true, italic: false });
     } else if (/^\*[^*]+\*$/.test(seg)) {
-      tokens.push({ type: "word", text: seg.slice(1, -1), bold: false, italic: true });
+      tokens.push({ type: "word", text: seg.slice(1, -1), bold: false, italic: false });
     } else {
       tokens.push({ type: "word", text: seg, bold: false, italic: false });
     }
@@ -307,7 +326,15 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
       p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      p.textContent = t.text;
+      if (/[?]$/.test((t.text || "").trim())) {
+        const bullet = document.createElement("span");
+        bullet.className = "response-overlay-bullet";
+        bullet.textContent = "• ";
+        p.appendChild(bullet);
+        p.appendChild(document.createTextNode(t.text));
+      } else {
+        p.textContent = t.text;
+      }
       container.appendChild(p);
       container.appendChild(document.createElement("br"));
       lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
@@ -382,7 +409,15 @@ function renderResponseTextStatic(container, text) {
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
       p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      p.textContent = t.text;
+      if (/[?]$/.test((t.text || "").trim())) {
+        const bullet = document.createElement("span");
+        bullet.className = "response-overlay-bullet";
+        bullet.textContent = "• ";
+        p.appendChild(bullet);
+        p.appendChild(document.createTextNode(t.text));
+      } else {
+        p.textContent = t.text;
+      }
       container.appendChild(p);
       container.appendChild(document.createElement("br"));
       lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
@@ -575,7 +610,7 @@ function renderResults(results, options = {}) {
       card.innerHTML = `
         <h3>${escapeHtml(name)}</h3>
         ${title ? `<p class="result-job-title">${escapeHtml(title)}</p>` : ""}
-        <p class="response-text">${escapeHtml(response || "")}</p>
+        <p class="response-text">${responseToHtml(response || "")}</p>
       `;
     }
     if (showSaveButton || !error) {
@@ -612,7 +647,7 @@ function renderResults(results, options = {}) {
         fc.innerHTML = `
           <h3>${escapeHtml(r.name)}</h3>
           ${r.jobTitle ? `<p class="result-job-title">${escapeHtml(r.jobTitle)}</p>` : ""}
-          <p class="response-text">${escapeHtml(r.response || "")}</p>
+          <p class="response-text">${responseToHtml(r.response || "")}</p>
         `;
         list.appendChild(fc);
       });

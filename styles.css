@@ -471,6 +471,19 @@ h2 {
   color: var(--text);
 }
 
+.result-card .response-text .response-text-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.result-card .response-text .response-text-link:hover {
+  color: #6ba3ff;
+}
+
 .result-card .response-error {
   margin: 0;
   font-size: 0.9rem;
@@ -889,6 +902,9 @@ h2 {
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
 }
 
 .response-overlay-text .response-overlay-link:hover {
