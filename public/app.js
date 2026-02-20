@@ -19,6 +19,27 @@ const councilLoadingMessage = document.getElementById("councilLoadingMessage");
 const fileInput = document.getElementById("fileInput");
 const uploadBtn = document.getElementById("uploadBtn");
 const attachmentsList = document.getElementById("attachmentsList");
+const responsesOverlay = document.getElementById("responsesOverlay");
+const responsesOverlayBackdrop = document.getElementById("responsesOverlayBackdrop");
+const responsesOverlayClose = document.getElementById("responsesOverlayClose");
+const responsesOverlayGrid = document.getElementById("responsesOverlayGrid");
+const returnToResponseBtn = document.getElementById("returnToResponseBtn");
+const followUpPromptBox = document.getElementById("followUpPromptBox");
+const followUpInput = document.getElementById("followUpInput");
+const followUpCancel = document.getElementById("followUpCancel");
+const followUpSend = document.getElementById("followUpSend");
+
+let currentFollowUp = null;
+
+const MEMBER_COLORS = {
+  1: { border: "#E02465", bg: "rgba(224, 36, 101, 0.95)", fg: "#fff", card: "rgba(20, 8, 12, 0.98)" },
+  2: { border: "#24BAE0", bg: "rgba(36, 186, 224, 0.95)", fg: "#0a1216", card: "rgba(8, 18, 24, 0.98)" },
+  3: { border: "#E0CF23", bg: "rgba(224, 207, 35, 0.95)", fg: "#1a1808", card: "rgba(22, 20, 8, 0.98)" },
+  4: { border: "#9045B0", bg: "rgba(144, 69, 176, 0.95)", fg: "#fff", card: "rgba(18, 8, 22, 0.98)" },
+  5: { border: "#E07844", bg: "rgba(224, 120, 68, 0.95)", fg: "#1a0f0a", card: "rgba(24, 12, 8, 0.98)" },
+};
+const WORDS_PER_MINUTE = 170;
+const MS_PER_WORD = (60 * 1000) / WORDS_PER_MINUTE;
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
@@ -177,6 +198,334 @@ function readFileAsBase64(file) {
   });
 }
 
+function tokenizeLineForFormatting(line) {
+  const tokens = [];
+  const re = /\*\*[^*]+\*\*|\*[^*]+\*|[^\s*]+|\s+/g;
+  let m;
+  while ((m = re.exec(line)) !== null) {
+    const seg = m[0];
+    if (/^\s+$/.test(seg)) continue;
+    if (/^\*\*[^*]+\*\*$/.test(seg)) {
+      tokens.push({ type: "word", text: seg.slice(2, -2), bold: true, italic: false });
+    } else if (/^\*[^*]+\*$/.test(seg)) {
+      tokens.push({ type: "word", text: seg.slice(1, -1), bold: false, italic: true });
+    } else {
+      tokens.push({ type: "word", text: seg, bold: false, italic: false });
+    }
+  }
+  return tokens;
+}
+
+function tokenizeForAnimation(text) {
+  if (!text || typeof text !== "string") return [];
+  const tokens = [];
+  const lines = text.split(/\n/);
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li].trim();
+    if (!line) continue;
+    const isShort = line.length < 40;
+    const noSentenceEnd = !/[.?!:]$/.test(line);
+    if (isShort && noSentenceEnd) {
+      tokens.push({ type: "header", text: line });
+      tokens.push({ type: "linebreak" });
+    } else {
+      tokens.push(...tokenizeLineForFormatting(line));
+      tokens.push({ type: "linebreak" });
+    }
+  }
+  return tokens;
+}
+
+function appendParagraphSpacer(container) {
+  const spacer = document.createElement("div");
+  spacer.className = "response-paragraph-spacer";
+  container.appendChild(spacer);
+}
+
+function appendBulletGroupSpacer(container) {
+  const spacer = document.createElement("div");
+  spacer.className = "response-bullet-group-spacer";
+  container.appendChild(spacer);
+}
+
+function getWordDelayMs(wpm, lastToken) {
+  if (lastToken && lastToken.type === "word" && /[.!?]$/.test(lastToken.text)) {
+    return 2000 + Math.round(Math.random() * 200);
+  }
+  const wpmVaried = 180 + Math.random() * 60;
+  const baseMs = (60 * 1000) / wpmVaried;
+  const variation = (Math.random() - 0.5) * 80;
+  return Math.max(150, Math.round(baseMs + variation));
+}
+
+function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
+  if (!container) return;
+  container.innerHTML = "";
+  const tokens = tokenizeForAnimation(text);
+  let i = 0;
+  let bulletNext = false;
+  let needSpace = false;
+  let previousWordEndedWithQuestion = false;
+  let firstQuestionInGroup = false;
+  let lastAppendedToken = null;
+
+  function scrollToBottom() {
+    const scrollParent = container.closest(".response-overlay-card-body");
+    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
+  }
+
+  function scheduleNext() {
+    if (i >= tokens.length) return;
+    const delay = getWordDelayMs(wpm, lastAppendedToken);
+    setTimeout(appendNext, delay);
+  }
+
+  function appendNext() {
+    if (i >= tokens.length) return;
+    const t = tokens[i];
+    i++;
+    lastAppendedToken = t;
+
+    if (t.type === "header") {
+      needSpace = false;
+      bulletNext = false;
+      firstQuestionInGroup = false;
+      previousWordEndedWithQuestion = false;
+      const p = document.createElement("p");
+      p.className = "response-overlay-section-header";
+      p.textContent = t.text;
+      container.appendChild(p);
+      const br = document.createElement("br");
+      container.appendChild(br);
+      scrollToBottom();
+      if (i < tokens.length) scheduleNext();
+      return;
+    }
+    if (t.type === "linebreak") {
+      needSpace = false;
+      container.appendChild(document.createElement("br"));
+      if (!previousWordEndedWithQuestion) appendParagraphSpacer(container);
+      previousWordEndedWithQuestion = false;
+      scrollToBottom();
+      if (i < tokens.length) scheduleNext();
+      return;
+    }
+    if (t.type === "word") {
+      if (bulletNext) {
+        bulletNext = false;
+        firstQuestionInGroup = true;
+        appendBulletGroupSpacer(container);
+        container.appendChild(document.createElement("br"));
+        const bullet = document.createElement("span");
+        bullet.className = "response-overlay-bullet";
+        bullet.textContent = "• ";
+        container.appendChild(bullet);
+      }
+      if (needSpace) container.appendChild(document.createTextNode(" "));
+      const span = document.createElement("span");
+      span.className = "response-word-appear";
+      span.textContent = t.text;
+      if (firstQuestionInGroup) {
+        span.classList.add("response-word-bold");
+      } else {
+        if (t.bold) span.classList.add("response-word-bold");
+        if (t.italic) span.classList.add("response-word-italic");
+      }
+      if (/[?]$/.test(t.text)) firstQuestionInGroup = false;
+      container.appendChild(span);
+      needSpace = true;
+      if (/[?]$/.test(t.text)) bulletNext = true;
+      previousWordEndedWithQuestion = /[?]$/.test(t.text);
+      scrollToBottom();
+    }
+    if (i < tokens.length) scheduleNext();
+  }
+  appendNext();
+}
+
+function renderResponseTextStatic(container, text) {
+  if (!container) return;
+  container.innerHTML = "";
+  const tokens = tokenizeForAnimation(text);
+  let bulletNext = false;
+  let needSpace = false;
+  let previousWordEndedWithQuestion = false;
+  let firstQuestionInGroup = false;
+  for (const t of tokens) {
+    if (t.type === "header") {
+      needSpace = false;
+      bulletNext = false;
+      firstQuestionInGroup = false;
+      previousWordEndedWithQuestion = false;
+      const p = document.createElement("p");
+      p.className = "response-overlay-section-header";
+      p.textContent = t.text;
+      container.appendChild(p);
+      container.appendChild(document.createElement("br"));
+      continue;
+    }
+    if (t.type === "linebreak") {
+      needSpace = false;
+      container.appendChild(document.createElement("br"));
+      if (!previousWordEndedWithQuestion) appendParagraphSpacer(container);
+      previousWordEndedWithQuestion = false;
+      continue;
+    }
+    if (t.type === "word") {
+      if (bulletNext) {
+        bulletNext = false;
+        firstQuestionInGroup = true;
+        appendBulletGroupSpacer(container);
+        container.appendChild(document.createElement("br"));
+        const bullet = document.createElement("span");
+        bullet.className = "response-overlay-bullet";
+        bullet.textContent = "• ";
+        container.appendChild(bullet);
+      }
+      if (needSpace) container.appendChild(document.createTextNode(" "));
+      const span = document.createElement("span");
+      span.textContent = t.text;
+      if (firstQuestionInGroup) {
+        span.classList.add("response-word-bold");
+      } else {
+        if (t.bold) span.classList.add("response-word-bold");
+        if (t.italic) span.classList.add("response-word-italic");
+      }
+      if (/[?]$/.test(t.text)) firstQuestionInGroup = false;
+      container.appendChild(span);
+      needSpace = true;
+      if (/[?]$/.test(t.text)) bulletNext = true;
+      previousWordEndedWithQuestion = /[?]$/.test(t.text);
+    }
+  }
+}
+
+function closeResponsesOverlay() {
+  if (responsesOverlay) responsesOverlay.hidden = true;
+}
+
+function updateReturnToResponseButton() {
+  if (returnToResponseBtn) returnToResponseBtn.hidden = lastResults.length === 0;
+}
+
+function openFollowUpPrompt({ gemId, name, response, card }) {
+  currentFollowUp = { gemId, name, response, card };
+  if (followUpPromptBox) followUpPromptBox.hidden = false;
+  if (followUpInput) {
+    followUpInput.value = "";
+    followUpInput.focus();
+  }
+}
+
+function closeFollowUpPrompt() {
+  currentFollowUp = null;
+  if (followUpPromptBox) followUpPromptBox.hidden = true;
+  if (followUpInput) followUpInput.value = "";
+}
+
+function appendFollowUpToCard(card, followUpText) {
+  if (!card) return;
+  const body = card.querySelector(".response-overlay-card-body");
+  if (!body) return;
+  let block = card.querySelector(".response-overlay-card-followup");
+  if (!block) {
+    block = document.createElement("div");
+    block.className = "response-overlay-card-followup";
+    block.innerHTML = "<h4>FOLLOW-UP</h4><div class=\"response-overlay-text\" role=\"article\"></div>";
+    body.appendChild(block);
+  }
+  const textEl = block.querySelector(".response-overlay-text");
+  if (textEl) animateResponseText(textEl, followUpText, WORDS_PER_MINUTE);
+}
+
+function openResponsesOverlay(results, options = {}) {
+  const { showSaveButton = true, jobTitleMap = {}, followUpsByGemId = {}, animate = true } = options;
+  if (!responsesOverlayGrid || !responsesOverlay) return;
+  responsesOverlayGrid.innerHTML = "";
+  const n = results.length;
+  results.forEach(({ gemId, name, response, error, jobTitle }) => {
+    const colors = MEMBER_COLORS[gemId] || MEMBER_COLORS[2];
+    const title = jobTitle || jobTitleMap[name] || "";
+    const card = document.createElement("div");
+    card.className = "response-overlay-card";
+    card.dataset.gemId = String(gemId);
+    card.style.setProperty("--member-border", colors.border);
+    card.style.setProperty("--member-bg", colors.bg);
+    card.style.setProperty("--member-fg", colors.fg);
+    card.style.setProperty("--member-card", colors.card);
+    const imgSrc = gems.find((g) => g.id === gemId)?.image;
+    const imgHtml = imgSrc ? `<img class="response-overlay-thumb" src="/${escapeHtml(imgSrc)}" alt="" />` : "";
+    card.innerHTML = `
+      <div class="response-overlay-card-header">
+        <div class="response-overlay-card-meta">
+          <span class="response-overlay-card-name">${escapeHtml(name)}</span>
+          <span class="response-overlay-card-role">${escapeHtml(title)}</span>
+        </div>
+        <div class="response-overlay-card-avatar">${imgHtml}</div>
+      </div>
+      <div class="response-overlay-card-body">
+        ${error ? `<p class="response-overlay-error">${escapeHtml(error)}</p>` : `<div class="response-overlay-text" role="article"></div>`}
+      </div>
+      <div class="response-overlay-actions"></div>
+    `;
+    const body = card.querySelector(".response-overlay-card-body");
+    const textEl = card.querySelector(".response-overlay-text");
+    const actionsEl = card.querySelector(".response-overlay-actions");
+    if (error) {
+      if (textEl) textEl.textContent = "";
+    } else if (textEl && response) {
+      if (animate) {
+        animateResponseText(textEl, response, WORDS_PER_MINUTE);
+      } else {
+        renderResponseTextStatic(textEl, response);
+      }
+    }
+    if (showSaveButton) {
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "btn-save response-overlay-btn";
+      saveBtn.textContent = "Save Response";
+      saveBtn.addEventListener("click", () => { saveCurrentChat(); });
+      actionsEl.appendChild(saveBtn);
+    }
+    if (!error && response) {
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.className = "btn-send-to response-overlay-btn";
+      sendBtn.textContent = "Send Response to…";
+      sendBtn.addEventListener("click", () => openSendToOverlay({ gemId, name, response }));
+      actionsEl.appendChild(sendBtn);
+      const followUpBtn = document.createElement("button");
+      followUpBtn.type = "button";
+      followUpBtn.className = "btn-follow-up response-overlay-btn";
+      followUpBtn.textContent = "Ask follow-up";
+      followUpBtn.addEventListener("click", () => openFollowUpPrompt({ gemId, name, response, card }));
+      actionsEl.appendChild(followUpBtn);
+    }
+    const followUp = followUpsByGemId[gemId];
+    if (followUp && followUp.length > 0) {
+      const block = document.createElement("div");
+      block.className = "response-overlay-followup";
+      block.innerHTML = "<h4>Thoughts from others</h4>";
+      const list = document.createElement("div");
+      list.className = "response-overlay-followup-list";
+      followUp.forEach((r) => {
+        const fc = document.createElement("div");
+        fc.className = "response-overlay-followup-item";
+        fc.innerHTML = `
+          <strong>${escapeHtml(r.name)}</strong> ${r.jobTitle ? `<span class="response-overlay-followup-role">${escapeHtml(r.jobTitle)}</span>` : ""}
+          <p class="response-overlay-followup-text">${escapeHtml(r.response || "")}</p>
+        `;
+        list.appendChild(fc);
+      });
+      block.appendChild(list);
+      card.appendChild(block);
+    }
+    responsesOverlayGrid.appendChild(card);
+  });
+  responsesOverlay.hidden = false;
+}
+
 function renderResults(results, options = {}) {
   const { showSaveButton = true, jobTitleMap = {}, followUpsByGemId = {} } = options;
   resultsList.innerHTML = "";
@@ -312,6 +661,7 @@ function confirmSendTo() {
     body: JSON.stringify({
       prompt,
       selectedGems: selectedIdsForRequest,
+      opinionOnResponse: true,
     }),
   })
     .then((r) => r.json())
@@ -322,11 +672,13 @@ function confirmSendTo() {
       const followUpsByGemId = {};
       const withTitles = data.results.map((r) => ({ ...r, jobTitle: jobTitleMap[r.name] || r.jobTitle }));
       followUpsByGemId[sourceGemId] = withTitles;
-      renderResults(lastResults, {
+      openResponsesOverlay(lastResults, {
         showSaveButton: true,
         jobTitleMap,
         followUpsByGemId,
+        animate: false,
       });
+      updateReturnToResponseButton();
       setStatus(`Got ${data.results.length} response(s) from others.`, "success");
     })
     .catch((err) => setStatus("Send failed: " + (err.message || "error"), "error"))
@@ -340,8 +692,51 @@ sendToOverlayBackdrop.addEventListener("click", closeSendToOverlay);
 sendToCancel.addEventListener("click", closeSendToOverlay);
 sendToConfirm.addEventListener("click", confirmSendTo);
 
-// Ensure overlay is hidden on load (only show when user clicks "Send Response to…")
+if (responsesOverlayBackdrop) responsesOverlayBackdrop.addEventListener("click", closeResponsesOverlay);
+if (responsesOverlayClose) responsesOverlayClose.addEventListener("click", closeResponsesOverlay);
+if (returnToResponseBtn) {
+  returnToResponseBtn.addEventListener("click", () => {
+    if (lastResults.length > 0 && responsesOverlay) responsesOverlay.hidden = false;
+  });
+}
+
+if (followUpCancel) followUpCancel.addEventListener("click", closeFollowUpPrompt);
+if (followUpSend) {
+  followUpSend.addEventListener("click", () => {
+    if (!currentFollowUp || !followUpInput) return;
+    const question = followUpInput.value.trim();
+    if (!question) return;
+    followUpSend.disabled = true;
+    setStatus("");
+    startCouncilLoading();
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selectedGems: [currentFollowUp.gemId],
+        prompt: question,
+        followUpPreviousResponse: currentFollowUp.response,
+      }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.results || !data.results.length) throw new Error(data.error || "No response");
+        const followUpResponse = data.results[0].response || "";
+        appendFollowUpToCard(currentFollowUp.card, followUpResponse);
+        closeFollowUpPrompt();
+        setStatus("Follow-up response added.", "success");
+      })
+      .catch((err) => setStatus("Follow-up failed: " + (err.message || "error"), "error"))
+      .finally(() => {
+        stopCouncilLoading();
+        followUpSend.disabled = false;
+      });
+  });
+}
+
 if (sendToOverlay) sendToOverlay.hidden = true;
+if (responsesOverlay) responsesOverlay.hidden = true;
+if (followUpPromptBox) followUpPromptBox.hidden = true;
 
 function loadRecentChats() {
   fetch("/api/chats")
@@ -372,7 +767,8 @@ function loadRecentChats() {
               const jobTitleMap = {};
               (c.results || []).forEach((r) => { jobTitleMap[r.name] = r.jobTitle || ""; });
               renderGems();
-              renderResults(c.results || [], { showSaveButton: false, jobTitleMap });
+              openResponsesOverlay(c.results || [], { showSaveButton: false, jobTitleMap, animate: false });
+              updateReturnToResponseButton();
               setSubmitState();
               recentChatsDropdown.hidden = true;
               setStatus("Loaded saved chat.");
@@ -413,6 +809,7 @@ async function submit() {
   submitBtn.disabled = true;
   setStatus("");
   resultsSection.hidden = true;
+  if (returnToResponseBtn) returnToResponseBtn.hidden = true;
   startCouncilLoading();
 
   try {
@@ -442,7 +839,8 @@ async function submit() {
     const jobTitleMap = {};
     gems.forEach((g) => { jobTitleMap[g.name] = g.jobTitle; });
     lastResults.forEach((r) => { r.jobTitle = jobTitleMap[r.name] || r.jobTitle; });
-    renderResults(lastResults, { showSaveButton: true, jobTitleMap });
+    openResponsesOverlay(lastResults, { showSaveButton: true, jobTitleMap, animate: true });
+    updateReturnToResponseButton();
     setStatus(`Done. ${lastResults.length} response(s).`, "success");
   } catch (err) {
     setStatus("Network error: " + (err.message || "Could not reach server"), "error");
