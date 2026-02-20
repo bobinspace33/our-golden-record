@@ -881,6 +881,20 @@ h2 {
   color: #fff;
 }
 
+.response-overlay-section-header.response-overlay-followup-community {
+  margin-bottom: 0.25em;
+}
+
+.response-overlay-text .response-overlay-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.response-overlay-text .response-overlay-link:hover {
+  color: #6ba3ff;
+}
+
 .response-paragraph-spacer {
   height: 1em;
   min-height: 1em;

@@ -248,6 +248,21 @@ function appendBulletGroupSpacer(container) {
   container.appendChild(spacer);
 }
 
+function isUrlToken(text) {
+  return /^https?:\/\/[^\s]+/.test(text);
+}
+
+function parseUrlWord(text) {
+  const match = text.match(/^(https?:\/\/[^\s]+?)([.,;:)\]]*)$/);
+  if (match) return { href: match[1], suffix: match[2] };
+  if (/^https?:\/\/[^\s]+$/.test(text)) return { href: text, suffix: "" };
+  return null;
+}
+
+function isFollowUpCommunityHeader(text) {
+  return /follow\s*up\s*in\s*your\s*community/i.test((text || "").trim());
+}
+
 function getWordDelayMs(wpm, lastToken) {
   if (lastToken && lastToken.type === "word" && /[.!?]$/.test(lastToken.text)) {
     return 2000 + Math.round(Math.random() * 200);
@@ -266,7 +281,7 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
   let bulletNext = false;
   let needSpace = false;
   let previousWordEndedWithQuestion = false;
-  let firstQuestionInGroup = false;
+  let lastWasFollowUpHeader = false;
   let lastAppendedToken = null;
 
   function scrollToBottom() {
@@ -289,14 +304,13 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
     if (t.type === "header") {
       needSpace = false;
       bulletNext = false;
-      firstQuestionInGroup = false;
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
-      p.className = "response-overlay-section-header";
+      p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
       p.textContent = t.text;
       container.appendChild(p);
-      const br = document.createElement("br");
-      container.appendChild(br);
+      container.appendChild(document.createElement("br"));
+      lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
       scrollToBottom();
       if (i < tokens.length) scheduleNext();
       return;
@@ -304,7 +318,11 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
     if (t.type === "linebreak") {
       needSpace = false;
       container.appendChild(document.createElement("br"));
-      if (!previousWordEndedWithQuestion) appendParagraphSpacer(container);
+      if (lastWasFollowUpHeader) {
+        lastWasFollowUpHeader = false;
+      } else if (!previousWordEndedWithQuestion) {
+        appendParagraphSpacer(container);
+      }
       previousWordEndedWithQuestion = false;
       scrollToBottom();
       if (i < tokens.length) scheduleNext();
@@ -313,7 +331,6 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
     if (t.type === "word") {
       if (bulletNext) {
         bulletNext = false;
-        firstQuestionInGroup = true;
         appendBulletGroupSpacer(container);
         container.appendChild(document.createElement("br"));
         const bullet = document.createElement("span");
@@ -322,17 +339,24 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
         container.appendChild(bullet);
       }
       if (needSpace) container.appendChild(document.createTextNode(" "));
-      const span = document.createElement("span");
-      span.className = "response-word-appear";
-      span.textContent = t.text;
-      if (firstQuestionInGroup) {
-        span.classList.add("response-word-bold");
+      const urlParts = parseUrlWord(t.text);
+      if (urlParts) {
+        const a = document.createElement("a");
+        a.className = "response-word-appear response-overlay-link";
+        a.href = urlParts.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = urlParts.href;
+        container.appendChild(a);
+        if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
       } else {
+        const span = document.createElement("span");
+        span.className = "response-word-appear";
+        span.textContent = t.text;
         if (t.bold) span.classList.add("response-word-bold");
         if (t.italic) span.classList.add("response-word-italic");
+        container.appendChild(span);
       }
-      if (/[?]$/.test(t.text)) firstQuestionInGroup = false;
-      container.appendChild(span);
       needSpace = true;
       if (/[?]$/.test(t.text)) bulletNext = true;
       previousWordEndedWithQuestion = /[?]$/.test(t.text);
@@ -350,31 +374,31 @@ function renderResponseTextStatic(container, text) {
   let bulletNext = false;
   let needSpace = false;
   let previousWordEndedWithQuestion = false;
-  let firstQuestionInGroup = false;
+  let lastWasFollowUpHeader = false;
   for (const t of tokens) {
     if (t.type === "header") {
       needSpace = false;
       bulletNext = false;
-      firstQuestionInGroup = false;
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
-      p.className = "response-overlay-section-header";
+      p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
       p.textContent = t.text;
       container.appendChild(p);
       container.appendChild(document.createElement("br"));
+      lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
       continue;
     }
     if (t.type === "linebreak") {
       needSpace = false;
       container.appendChild(document.createElement("br"));
-      if (!previousWordEndedWithQuestion) appendParagraphSpacer(container);
+      if (lastWasFollowUpHeader) lastWasFollowUpHeader = false;
+      else if (!previousWordEndedWithQuestion) appendParagraphSpacer(container);
       previousWordEndedWithQuestion = false;
       continue;
     }
     if (t.type === "word") {
       if (bulletNext) {
         bulletNext = false;
-        firstQuestionInGroup = true;
         appendBulletGroupSpacer(container);
         container.appendChild(document.createElement("br"));
         const bullet = document.createElement("span");
@@ -383,16 +407,23 @@ function renderResponseTextStatic(container, text) {
         container.appendChild(bullet);
       }
       if (needSpace) container.appendChild(document.createTextNode(" "));
-      const span = document.createElement("span");
-      span.textContent = t.text;
-      if (firstQuestionInGroup) {
-        span.classList.add("response-word-bold");
+      const urlParts = parseUrlWord(t.text);
+      if (urlParts) {
+        const a = document.createElement("a");
+        a.className = "response-overlay-link";
+        a.href = urlParts.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = urlParts.href;
+        container.appendChild(a);
+        if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
       } else {
+        const span = document.createElement("span");
+        span.textContent = t.text;
         if (t.bold) span.classList.add("response-word-bold");
         if (t.italic) span.classList.add("response-word-italic");
+        container.appendChild(span);
       }
-      if (/[?]$/.test(t.text)) firstQuestionInGroup = false;
-      container.appendChild(span);
       needSpace = true;
       if (/[?]$/.test(t.text)) bulletNext = true;
       previousWordEndedWithQuestion = /[?]$/.test(t.text);
