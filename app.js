@@ -925,7 +925,7 @@ async function loadGems() {
   } catch {
     gems = [
       { id: 1, name: "Henrietta", jobTitle: "Scientific Historian", image: "henrietta.jpg" },
-      { id: 2, name: "Jane", jobTitle: "Cultural Ethnographer", image: "jane.jpg" },
+      { id: 2, name: "Jane", jobTitle: "Cultural Ethnographer", image: "jane.png" },
       { id: 3, name: "Laika", jobTitle: "Launch Visionary", image: "Laika.jpg" },
       { id: 4, name: "Wolfgang", jobTitle: "Logistics Architect", image: "wolfgang.jpg" },
       { id: 5, name: "Carl", jobTitle: "Interstellar Linguist", image: "carl.jpg" },

@@ -172,7 +172,7 @@ const JOB_TITLES = {
 // Thumbnail filenames in public/ (one per gem)
 const GEM_IMAGES = {
   Henrietta: "henrietta.jpg",
-  Jane: "jane.jpg",
+  Jane: "jane.png",
   Laika: "Laika.jpg",
   Wolfgang: "wolfgang.jpg",
   Carl: "carl.jpg",

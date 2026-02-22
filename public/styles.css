@@ -1,3 +1,35 @@
+/* Apple Garamond – member cards */
+@font-face {
+  font-family: "Apple Garamond";
+  src: url("Fonts/AppleGaramond.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Apple Garamond";
+  src: url("Fonts/AppleGaramond-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Apple Garamond";
+  src: url("Fonts/AppleGaramond-LightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Apple Garamond";
+  src: url("Fonts/AppleGaramond-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Apple Garamond";
+  src: url("Fonts/AppleGaramond-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+}
+
 :root {
   --bg: #0f0f12;
   --surface: #18181c;
@@ -13,6 +45,7 @@
   --radius: 12px;
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
+  --font-garamond: "Apple Garamond", "AppleGaramond", "Garamond", serif;
 }
 
 * {
@@ -202,8 +235,8 @@ h2 {
 
 .gems-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.25rem;
 }
 
 /* Council card colors: 3 base (#E02465, #24BAE0, #E0CF23) + 2 derived (violet, orange) */
@@ -213,13 +246,14 @@ h2 {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 1rem;
-  min-height: 80px;
+  padding: 1.5rem 1.25rem;
+  min-height: 140px;
   background: var(--surface);
   border: 2px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  font-family: var(--font-garamond);
 }
 
 .gem-card[data-color-index="1"] { border-color: #E02465; background: rgba(224, 36, 101, 0.12); }
@@ -241,26 +275,29 @@ h2 {
 .gem-card[data-color-index="5"].selected { border-color: #E07844; background: rgba(224, 120, 68, 0.28); box-shadow: 0 0 0 1px #E07844; }
 
 .gem-card-thumb {
-  width: 56px;
-  height: 56px;
+  width: 88px;
+  height: 88px;
   object-fit: cover;
   border-radius: 50%;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
   flex-shrink: 0;
   background: var(--border);
 }
 
 .gem-card .gem-name {
+  font-family: var(--font-garamond);
   font-weight: 600;
-  font-size: 0.95rem;
-  margin-bottom: 0.25rem;
+  font-size: 1.35rem;
+  margin-bottom: 0.35rem;
+  letter-spacing: 0.02em;
 }
 
 .gem-card .gem-job-title {
-  font-size: 1.1rem;
-  font-weight: 500;
+  font-family: var(--font-garamond);
+  font-size: 1.15rem;
+  font-weight: 400;
   color: var(--text-muted);
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .gem-card.disabled {
