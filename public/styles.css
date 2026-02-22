@@ -234,9 +234,11 @@ h2 {
 }
 
 .gems-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: 1.25rem;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Council card colors: 3 base (#E02465, #24BAE0, #E0CF23) + 2 derived (violet, orange) */
@@ -248,6 +250,8 @@ h2 {
   text-align: center;
   padding: 1.5rem 1.25rem;
   min-height: 140px;
+  flex: 1 1 0;
+  min-width: 0;
   background: var(--surface);
   border: 2px solid var(--border);
   border-radius: var(--radius);
@@ -287,15 +291,15 @@ h2 {
 .gem-card .gem-name {
   font-family: var(--font-garamond);
   font-weight: 600;
-  font-size: 1.35rem;
+  font-size: 1rem;
   margin-bottom: 0.35rem;
   letter-spacing: 0.02em;
 }
 
 .gem-card .gem-job-title {
   font-family: var(--font-garamond);
-  font-size: 1.15rem;
-  font-weight: 400;
+  font-size: 1.4rem;
+  font-weight: 500;
   color: var(--text-muted);
   line-height: 1.25;
 }
