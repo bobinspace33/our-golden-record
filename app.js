@@ -40,9 +40,9 @@ const MEMBER_COLORS = {
 };
 const WORDS_PER_MINUTE = 170;
 const MS_PER_WORD = (60 * 1000) / WORDS_PER_MINUTE;
-const LETTER_DELAY_MS = 12;
-const SENTENCE_END_PAUSE_MS = 380;
-const LINE_BREAK_PAUSE_MS = 220;
+const LETTER_DELAY_MS = 20;
+const SENTENCE_END_PAUSE_MS = 2000;
+const LINE_BREAK_PAUSE_MS = 2000;
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
