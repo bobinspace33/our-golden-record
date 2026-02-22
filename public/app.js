@@ -48,19 +48,55 @@ const COUNCIL_LOADING_PHRASES = [
   "Discussing your question…",
   "Preparing their responses…",
   "Considering different perspectives…",
+  "Gathering insights from the Golden Record…",
+  "Weighing multiple viewpoints…",
+  "Refining their answers…",
+  "Almost there…",
+];
+
+const COUNCIL_LOADING_STEPS = [
+  "Connecting…",
+  "Loading context…",
+  "Consulting members…",
+  "Processing question…",
+  "Synthesizing perspectives…",
+  "Drafting responses…",
+  "Reviewing criteria…",
+  "Finalizing…",
 ];
 
 let councilLoadingInterval = null;
+let councilLoadingProgressInterval = null;
 
 function startCouncilLoading() {
+  const bar = document.getElementById("councilLoadingBar");
+  const stepEl = document.getElementById("councilLoadingStep");
   if (!councilLoading || !councilLoadingMessage) return;
   councilLoading.hidden = false;
+  if (bar) {
+    bar.style.width = "0%";
+    bar.ownerDocument.querySelector(".council-loading-overlay [role=progressbar]")?.setAttribute("aria-valuenow", 0);
+  }
+  if (stepEl) stepEl.textContent = COUNCIL_LOADING_STEPS[0] || "";
   let i = 0;
   councilLoadingMessage.textContent = COUNCIL_LOADING_PHRASES[0];
   councilLoadingInterval = setInterval(() => {
     i = (i + 1) % COUNCIL_LOADING_PHRASES.length;
     councilLoadingMessage.textContent = COUNCIL_LOADING_PHRASES[i];
   }, 2200);
+  let progress = 0;
+  let stepIndex = 0;
+  const progressRole = councilLoading?.querySelector("[role=progressbar]");
+  councilLoadingProgressInterval = setInterval(() => {
+    progress = Math.min(progress + 8 + Math.floor(Math.random() * 5), 92);
+    stepIndex = Math.min(
+      Math.floor((progress / 100) * COUNCIL_LOADING_STEPS.length),
+      COUNCIL_LOADING_STEPS.length - 1
+    );
+    if (bar) bar.style.width = progress + "%";
+    if (progressRole) progressRole.setAttribute("aria-valuenow", progress);
+    if (stepEl) stepEl.textContent = COUNCIL_LOADING_STEPS[stepIndex] || "";
+  }, 900);
 }
 
 function stopCouncilLoading() {
@@ -68,7 +104,21 @@ function stopCouncilLoading() {
     clearInterval(councilLoadingInterval);
     councilLoadingInterval = null;
   }
-  if (councilLoading) councilLoading.hidden = true;
+  if (councilLoadingProgressInterval) {
+    clearInterval(councilLoadingProgressInterval);
+    councilLoadingProgressInterval = null;
+  }
+  const bar = document.getElementById("councilLoadingBar");
+  const progressRole = councilLoading?.querySelector("[role=progressbar]");
+  if (bar) {
+    bar.style.width = "100%";
+    if (progressRole) progressRole.setAttribute("aria-valuenow", 100);
+  }
+  const stepEl = document.getElementById("councilLoadingStep");
+  if (stepEl) stepEl.textContent = COUNCIL_LOADING_STEPS[COUNCIL_LOADING_STEPS.length - 1] || "Done.";
+  setTimeout(() => {
+    if (councilLoading) councilLoading.hidden = true;
+  }, 280);
 }
 
 let gems = [];
@@ -158,23 +208,60 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-function responseToHtml(text) {
-  if (text == null || text === "") return "";
-  const urlRe = /(https?:\/\/[^\s]+?)([.,;:)\]\s]|$)/g;
-  let html = "";
+const URL_REGEX = /https?:\/\/[^\s<>"\']+/g;
+
+function extractUrlSegments(str) {
+  if (!str || typeof str !== "string") return [{ type: "text", value: str || "" }];
+  const result = [];
   let lastIndex = 0;
   let m;
-  while ((m = urlRe.exec(text)) !== null) {
-    const before = text.slice(lastIndex, m.index);
-    if (before) html += escapeHtml(before);
-    const url = m[1];
-    const suffix = m[2];
-    html += '<a class="response-text-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + "</a>";
-    if (suffix) html += escapeHtml(suffix);
-    lastIndex = urlRe.lastIndex;
+  URL_REGEX.lastIndex = 0;
+  while ((m = URL_REGEX.exec(str)) !== null) {
+    const before = str.slice(lastIndex, m.index);
+    if (before) result.push({ type: "text", value: before });
+    let url = m[0];
+    const trailing = url.match(/[.,;:)\]\]]+$/);
+    if (trailing) {
+      url = url.slice(0, -trailing[0].length);
+      result.push({ type: "url", value: url });
+      result.push({ type: "text", value: trailing[0] });
+    } else {
+      result.push({ type: "url", value: url });
+    }
+    lastIndex = m.index + m[0].length;
   }
-  if (lastIndex < text.length) html += escapeHtml(text.slice(lastIndex));
-  return html || escapeHtml(text);
+  if (lastIndex < str.length) result.push({ type: "text", value: str.slice(lastIndex) });
+  return result.length ? result : [{ type: "text", value: str }];
+}
+
+function responseToHtml(text) {
+  if (text == null || text === "") return "";
+  let out = "";
+  const mdLinkRe = /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+  let lastEnd = 0;
+  let mdMatch;
+  const parts = [];
+  while ((mdMatch = mdLinkRe.exec(text)) !== null) {
+    parts.push({ type: "text", value: text.slice(lastEnd, mdMatch.index) });
+    parts.push({ type: "mdLink", text: mdMatch[1], url: mdMatch[2] });
+    lastEnd = mdLinkRe.lastIndex;
+  }
+  parts.push({ type: "text", value: text.slice(lastEnd) });
+  for (const p of parts) {
+    if (p.type === "mdLink") {
+      out += '<a class="response-text-link" href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.text || p.url) + "</a>";
+      continue;
+    }
+    const segments = extractUrlSegments(p.value);
+    for (const s of segments) {
+      if (s.type === "url") {
+        out += '<a class="response-text-link" href="' + escapeHtml(s.value) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(s.value) + "</a>";
+      } else {
+        out += escapeHtml(s.value);
+      }
+    }
+  }
+  return out || escapeHtml(text);
 }
 
 const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf"];
@@ -377,12 +464,25 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
         container.appendChild(a);
         if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
       } else {
-        const span = document.createElement("span");
-        span.className = "response-word-appear";
-        span.textContent = t.text;
-        if (t.bold) span.classList.add("response-word-bold");
-        if (t.italic) span.classList.add("response-word-italic");
-        container.appendChild(span);
+        const segments = extractUrlSegments(t.text);
+        for (const seg of segments) {
+          if (seg.type === "url") {
+            const a = document.createElement("a");
+            a.className = "response-word-appear response-overlay-link";
+            a.href = seg.value;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = seg.value;
+            container.appendChild(a);
+          } else {
+            const span = document.createElement("span");
+            span.className = "response-word-appear";
+            span.textContent = seg.value;
+            if (t.bold) span.classList.add("response-word-bold");
+            if (t.italic) span.classList.add("response-word-italic");
+            container.appendChild(span);
+          }
+        }
       }
       needSpace = true;
       if (/[?]$/.test(t.text)) bulletNext = true;
@@ -453,11 +553,24 @@ function renderResponseTextStatic(container, text) {
         container.appendChild(a);
         if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
       } else {
-        const span = document.createElement("span");
-        span.textContent = t.text;
-        if (t.bold) span.classList.add("response-word-bold");
-        if (t.italic) span.classList.add("response-word-italic");
-        container.appendChild(span);
+        const segments = extractUrlSegments(t.text);
+        for (const seg of segments) {
+          if (seg.type === "url") {
+            const a = document.createElement("a");
+            a.className = "response-overlay-link";
+            a.href = seg.value;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = seg.value;
+            container.appendChild(a);
+          } else {
+            const span = document.createElement("span");
+            span.textContent = seg.value;
+            if (t.bold) span.classList.add("response-word-bold");
+            if (t.italic) span.classList.add("response-word-italic");
+            container.appendChild(span);
+          }
+        }
       }
       needSpace = true;
       if (/[?]$/.test(t.text)) bulletNext = true;

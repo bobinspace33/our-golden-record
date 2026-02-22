@@ -90,12 +90,19 @@
     </div>
   </div>
 
-    <div class="council-loading" id="councilLoading" hidden aria-live="polite">
+    <div class="status" id="status" aria-live="polite"></div>
+  </div>
+
+  <div class="overlay council-loading-overlay" id="councilLoading" hidden aria-live="polite" aria-busy="true">
+    <div class="council-loading-backdrop"></div>
+    <div class="council-loading-panel">
       <div class="council-loading-spinner"></div>
       <p class="council-loading-message" id="councilLoadingMessage">Council members are thinking…</p>
+      <div class="council-loading-bar-wrap" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading">
+        <div class="council-loading-bar" id="councilLoadingBar"></div>
+      </div>
+      <p class="council-loading-step" id="councilLoadingStep"></p>
     </div>
-
-    <div class="status" id="status" aria-live="polite"></div>
   </div>
 
   <div class="overlay" id="sendToOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="sendToOverlayTitle">

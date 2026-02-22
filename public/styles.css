@@ -689,28 +689,46 @@ h2 {
   margin-top: 0.5rem;
 }
 
-/* Council loading indicator */
-.council-loading {
+/* Council loading overlay – centered on screen */
+.council-loading-overlay {
+  position: fixed;
+  inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
-  padding: 2rem;
-  margin-top: 1.5rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  min-height: 140px;
+  z-index: 200;
+  padding: 1.5rem;
 }
 
-.council-loading[hidden] {
+.council-loading-overlay[hidden] {
   display: none !important;
 }
 
+.council-loading-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+}
+
+.council-loading-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 2.5rem 2.5rem 2rem;
+  min-width: 320px;
+  max-width: 90vw;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
 .council-loading-spinner {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -725,8 +743,8 @@ h2 {
 
 .council-loading-message {
   margin: 0;
-  font-size: 0.95rem;
-  color: var(--text-muted);
+  font-size: 1.05rem;
+  color: var(--text);
   text-align: center;
   animation: council-pulse 2s ease-in-out infinite;
 }
@@ -739,6 +757,30 @@ h2 {
   50% {
     opacity: 1;
   }
+}
+
+.council-loading-bar-wrap {
+  width: 100%;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.council-loading-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), #6ba3ff);
+  border-radius: 4px;
+  transition: width 0.35s ease-out;
+}
+
+.council-loading-step {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .status {
@@ -939,16 +981,19 @@ h2 {
   margin-bottom: 0.25em;
 }
 
-.response-overlay-text .response-overlay-link {
+.response-overlay-text .response-overlay-link,
+.response-overlay-text a[href] {
   color: var(--accent);
   text-decoration: underline;
   cursor: pointer;
   pointer-events: auto;
   position: relative;
   z-index: 1;
+  display: inline;
 }
 
-.response-overlay-text .response-overlay-link:hover {
+.response-overlay-text .response-overlay-link:hover,
+.response-overlay-text a[href]:hover {
   color: #6ba3ff;
 }
 
