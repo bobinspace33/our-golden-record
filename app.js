@@ -40,6 +40,9 @@ const MEMBER_COLORS = {
 };
 const WORDS_PER_MINUTE = 170;
 const MS_PER_WORD = (60 * 1000) / WORDS_PER_MINUTE;
+const LETTER_DELAY_MS = 12;
+const SENTENCE_END_PAUSE_MS = 380;
+const LINE_BREAK_PAUSE_MS = 220;
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
@@ -208,7 +211,14 @@ function escapeHtml(s) {
   return div.innerHTML;
 }
 
-const URL_REGEX = /https?:\/\/[^\s<>"\']+/g;
+const URL_REGEX = /https?:\/\/[^\s<>"\']+|www\.[^\s<>"\']+/gi;
+
+function normalizeUrl(url) {
+  const u = url.trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^www\./i.test(u)) return "https://" + u;
+  return u;
+}
 
 function extractUrlSegments(str) {
   if (!str || typeof str !== "string") return [{ type: "text", value: str || "" }];
@@ -223,10 +233,10 @@ function extractUrlSegments(str) {
     const trailing = url.match(/[.,;:)\]\]]+$/);
     if (trailing) {
       url = url.slice(0, -trailing[0].length);
-      result.push({ type: "url", value: url });
+      result.push({ type: "url", value: normalizeUrl(url) });
       result.push({ type: "text", value: trailing[0] });
     } else {
-      result.push({ type: "url", value: url });
+      result.push({ type: "url", value: normalizeUrl(url) });
     }
     lastIndex = m.index + m[0].length;
   }
@@ -237,7 +247,7 @@ function extractUrlSegments(str) {
 function responseToHtml(text) {
   if (text == null || text === "") return "";
   let out = "";
-  const mdLinkRe = /\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g;
+  const mdLinkRe = /\[([^\]]*)\]\((https?:\/\/[^)\s]+|www\.[^)\s]+)\)/gi;
   let lastEnd = 0;
   let mdMatch;
   const parts = [];
@@ -249,7 +259,7 @@ function responseToHtml(text) {
   parts.push({ type: "text", value: text.slice(lastEnd) });
   for (const p of parts) {
     if (p.type === "mdLink") {
-      out += '<a class="response-text-link" href="' + escapeHtml(p.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.text || p.url) + "</a>";
+      out += '<a class="response-text-link" href="' + escapeHtml(normalizeUrl(p.url)) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.text || p.url) + "</a>";
       continue;
     }
     const segments = extractUrlSegments(p.value);
@@ -359,9 +369,9 @@ function isUrlToken(text) {
 }
 
 function parseUrlWord(text) {
-  const match = text.match(/^(https?:\/\/[^\s]+?)([.,;:)\]]*)$/);
-  if (match) return { href: match[1], suffix: match[2] };
-  if (/^https?:\/\/[^\s]+$/.test(text)) return { href: text, suffix: "" };
+  const match = text.match(/^(https?:\/\/[^\s]+?|www\.[^\s]+?)([.,;:)\]]*)$/i);
+  if (match) return { href: normalizeUrl(match[1]), suffix: match[2] };
+  if (/^(https?:\/\/[^\s]+|www\.[^\s]+)$/i.test(text)) return { href: normalizeUrl(text), suffix: "" };
   return null;
 }
 
@@ -369,14 +379,8 @@ function isFollowUpCommunityHeader(text) {
   return /follow\s*up\s*in\s*your\s*community/i.test((text || "").trim());
 }
 
-function getWordDelayMs(wpm, lastToken) {
-  if (lastToken && lastToken.type === "word" && /[.!?]$/.test(lastToken.text)) {
-    return 2000 + Math.round(Math.random() * 200);
-  }
-  const wpmVaried = 180 + Math.random() * 60;
-  const baseMs = (60 * 1000) / wpmVaried;
-  const variation = (Math.random() - 0.5) * 80;
-  return Math.max(150, Math.round(baseMs + variation));
+function getWordDelayMs() {
+  return 0;
 }
 
 function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
@@ -413,20 +417,30 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
       p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      if (/[?]$/.test((t.text || "").trim())) {
+      const headerText = (t.text || "").trim();
+      if (/[?]$/.test(headerText)) {
         const bullet = document.createElement("span");
         bullet.className = "response-overlay-bullet";
         bullet.textContent = "• ";
         p.appendChild(bullet);
-        p.appendChild(document.createTextNode(t.text));
-      } else {
-        p.textContent = t.text;
       }
+      const textNode = document.createTextNode("");
+      p.appendChild(textNode);
       container.appendChild(p);
       container.appendChild(document.createElement("br"));
       lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
-      scrollToBottom();
-      if (i < tokens.length) scheduleNext();
+      let hIdx = 0;
+      function headerTick() {
+        if (hIdx >= headerText.length) {
+          scrollToBottom();
+          if (i < tokens.length) setTimeout(scheduleNext, SENTENCE_END_PAUSE_MS);
+          return;
+        }
+        textNode.textContent += headerText[hIdx++];
+        scrollToBottom();
+        setTimeout(headerTick, LETTER_DELAY_MS);
+      }
+      headerTick();
       return;
     }
     if (t.type === "linebreak") {
@@ -439,7 +453,7 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       }
       previousWordEndedWithQuestion = false;
       scrollToBottom();
-      if (i < tokens.length) scheduleNext();
+      if (i < tokens.length) setTimeout(scheduleNext, LINE_BREAK_PAUSE_MS);
       return;
     }
     if (t.type === "word") {
@@ -463,31 +477,56 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
         a.textContent = urlParts.href;
         container.appendChild(a);
         if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
-      } else {
-        const segments = extractUrlSegments(t.text);
-        for (const seg of segments) {
-          if (seg.type === "url") {
-            const a = document.createElement("a");
-            a.className = "response-word-appear response-overlay-link";
-            a.href = seg.value;
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            a.textContent = seg.value;
-            container.appendChild(a);
-          } else {
-            const span = document.createElement("span");
-            span.className = "response-word-appear";
-            span.textContent = seg.value;
-            if (t.bold) span.classList.add("response-word-bold");
-            if (t.italic) span.classList.add("response-word-italic");
-            container.appendChild(span);
-          }
-        }
+        needSpace = true;
+        if (/[?]$/.test(t.text)) bulletNext = true;
+        previousWordEndedWithQuestion = /[?]$/.test(t.text);
+        scrollToBottom();
+        if (i < tokens.length) setTimeout(scheduleNext, 25);
+        return;
       }
-      needSpace = true;
-      if (/[?]$/.test(t.text)) bulletNext = true;
-      previousWordEndedWithQuestion = /[?]$/.test(t.text);
-      scrollToBottom();
+      const segments = extractUrlSegments(t.text);
+      let segIdx = 0;
+      function onSegmentDone() {
+        if (segIdx >= segments.length) {
+          needSpace = true;
+          if (/[?]$/.test(t.text)) bulletNext = true;
+          previousWordEndedWithQuestion = /[?]$/.test(t.text);
+          scrollToBottom();
+          if (i < tokens.length) scheduleNext();
+          return;
+        }
+        const seg = segments[segIdx++];
+        if (seg.type === "url") {
+          const a = document.createElement("a");
+          a.className = "response-word-appear response-overlay-link";
+          a.href = seg.value;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = seg.value;
+          container.appendChild(a);
+          scrollToBottom();
+          setTimeout(onSegmentDone, 25);
+          return;
+        }
+        const span = document.createElement("span");
+        span.className = "response-word-appear" + (t.bold ? " response-word-bold" : "") + (t.italic ? " response-word-italic" : "");
+        container.appendChild(span);
+        let charIdx = 0;
+        function tick() {
+          if (charIdx >= seg.value.length) {
+            onSegmentDone();
+            return;
+          }
+          const ch = seg.value[charIdx++];
+          span.textContent += ch;
+          scrollToBottom();
+          const delay = /[.!?]/.test(ch) ? SENTENCE_END_PAUSE_MS : LETTER_DELAY_MS;
+          setTimeout(tick, delay);
+        }
+        tick();
+      }
+      onSegmentDone();
+      return;
     }
     if (i < tokens.length) scheduleNext();
   }
@@ -773,6 +812,14 @@ function renderResults(results, options = {}) {
   resultsSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+function getSaveTitle() {
+  if (!lastResults.length) return "";
+  const first = lastResults[0];
+  const jobTitle = first.jobTitle || gems.find((g) => g.id === first.gemId)?.jobTitle || first.name;
+  const now = new Date();
+  return `${jobTitle} • ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 function saveCurrentChat() {
   if (!lastResults.length) return;
   fetch("/api/chats", {
@@ -782,6 +829,7 @@ function saveCurrentChat() {
       prompt: lastPrompt,
       selectedGems: lastSelectedGems,
       results: lastResults,
+      title: getSaveTitle(),
     }),
   })
     .then((r) => r.json())
@@ -929,10 +977,9 @@ function loadRecentChats() {
         btn.type = "button";
         btn.className = "recent-chat-item";
         const date = new Date(chat.createdAt);
-        const dateStr = date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
         btn.innerHTML = `
-          <span class="recent-chat-prompt">${escapeHtml(chat.prompt)}</span>
-          <span class="recent-chat-meta">${dateStr} · ${chat.resultCount} response(s)</span>
+          <span class="recent-chat-prompt">${escapeHtml(chat.title || chat.prompt)}</span>
+          <span class="recent-chat-meta">${chat.resultCount} response(s)</span>
         `;
         btn.addEventListener("click", () => {
           fetch(`/api/chats/${chat.id}`)

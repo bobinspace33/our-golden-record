@@ -219,13 +219,23 @@ const savedChats = [];
 let chatIdCounter = 1;
 
 app.post("/api/chats", (req, res) => {
-  const { prompt, selectedGems, results } = req.body;
+  const { prompt, selectedGems, results, title } = req.body;
   if (!prompt || !Array.isArray(results)) {
     return res.status(400).json({ error: "prompt and results required." });
   }
+  const firstResult = results[0];
+  const firstJobTitle = firstResult && (firstResult.jobTitle || JOB_TITLES[firstResult?.name]);
+  const now = new Date();
+  const titleStr =
+    typeof title === "string" && title.trim()
+      ? title.trim()
+      : firstJobTitle
+        ? `${firstJobTitle} • ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+        : `Saved response • ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
   const chat = {
     id: String(chatIdCounter++),
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
+    title: titleStr,
     prompt,
     selectedGems: Array.isArray(selectedGems) ? selectedGems : [],
     results: results.map((r) => ({
@@ -239,7 +249,7 @@ app.post("/api/chats", (req, res) => {
   savedChats.unshift(chat);
   const maxChats = 100;
   if (savedChats.length > maxChats) savedChats.length = maxChats;
-  res.json({ id: chat.id, createdAt: chat.createdAt });
+  res.json({ id: chat.id, createdAt: chat.createdAt, title: chat.title });
 });
 
 app.get("/api/chats", (req, res) => {
@@ -247,6 +257,7 @@ app.get("/api/chats", (req, res) => {
     chats: savedChats.map((c) => ({
       id: c.id,
       createdAt: c.createdAt,
+      title: c.title || c.prompt,
       prompt: c.prompt,
       resultCount: c.results.length,
     })),
@@ -274,17 +285,17 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
   let userPrompt = promptText || "(The user sent the following files with no additional text.)";
-  let wordLimit = 400;
+  let wordLimit = 260;
   if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
     userPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${userPrompt}`;
-    wordLimit = 200;
+    wordLimit = 150;
   } else if (opinionOnResponse) {
-    userPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 300 words maximum.\n\n---\n\n${userPrompt}`;
-    wordLimit = 300;
+    userPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${userPrompt}`;
+    wordLimit = 200;
   }
 
   const locationStr = await getLocationFromRequest(req);
-  const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits (e.g. Native American or indigenous culture), university departments with relevant experts, or non-profits. Include the resource name, a working website URL if you know one, a phone number if known, and an email address when possible. If you cannot name a specific institution, suggest the type of place to look (e.g. a tribal cultural center, a university anthropology or history department) and brief guidance. Keep this section concise.]`;
+  const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits (e.g. Native American or indigenous culture), university departments with relevant experts, or non-profits. For the resource: (1) Always hyperlink the website—use a full URL (https://...) for any site you mention. (2) Include a phone number and email address when you can find them. (3) When possible, name a specific contact person (e.g. a department director, educator, or program coordinator) at a university department or museum. Include the resource name, working website URL, phone number if known, and email when possible. If you cannot name a specific institution, suggest the type of place to look and brief guidance. Keep this section concise.]`;
   userPrompt = userPrompt + resourceInstruction;
 
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -325,7 +336,7 @@ app.post("/api/chat", async (req, res) => {
         const contents = allParts.length > 1 ? createUserContent(allParts) : userPrompt;
         const responseInstruction =
           (gem.systemInstruction || "") +
-          `\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total. Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response.`;
+          `\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
         const response = await ai.models.generateContent({
           model: gem.model,
           contents,
