@@ -3,120 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Our Golden Record AI Council</title>
+  <title>AI Council Creator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="creator.css" />
 </head>
-<body>
-  <div class="layout">
-    <header class="header">
-      <div class="header-row">
-        <h1>Our Golden Record AI Council</h1>
-        <div class="recent-chats-wrap">
-          <button type="button" class="recent-chats-btn" id="recentChatsBtn" aria-haspopup="true" aria-expanded="false">Recent Chats</button>
-          <div class="recent-chats-dropdown" id="recentChatsDropdown" hidden>
-            <div class="recent-chats-list" id="recentChatsList"></div>
-            <p class="recent-chats-empty" id="recentChatsEmpty">No saved chats yet.</p>
-          </div>
-        </div>
-      </div>
-      <p class="tagline">Select council members, send one prompt, get separate responses</p>
+<body class="creator-body home-body">
+  <div class="layout layout-wide">
+    <header class="creator-header">
+      <h1>AI Council Creator</h1>
+      <p class="tagline">Design a council of AI (and human) stakeholders for any project-based learning unit. Open an existing council or build a new one.</p>
     </header>
 
-    <section class="phase-section">
-      <span class="phase-label">Project Phase</span>
-      <div class="phase-options" role="group" aria-label="Project Phase">
-        <label class="phase-option"><input type="radio" name="projectPhase" value="1" checked /> 1</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="2" /> 2</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="3" /> 3</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="4" /> 4</label>
-      </div>
+    <section class="home-section">
+      <h2 class="home-section-title">Saved drafts</h2>
+      <p class="home-section-desc">Templates you saved before launch—continue editing anytime.</p>
+      <ul class="project-list draft-list" id="draftList"></ul>
+      <p class="home-empty home-draft-empty" id="draftEmpty" hidden>No drafts yet. Use Save draft on the create page.</p>
     </section>
 
-    <section class="gems-section">
-      <h2>Select Members</h2>
-      <div class="gems-grid" id="gemsGrid">
-        <!-- Filled by JS -->
-      </div>
-      <p class="hint" id="selectionHint">Select at least one member</p>
+    <section class="home-section">
+      <h2 class="home-section-title">Your councils</h2>
+      <ul class="project-list" id="projectList">
+        <!-- filled by home.js -->
+      </ul>
+      <p class="home-empty" id="homeEmpty" hidden>No saved councils yet. Create one below.</p>
     </section>
 
-    <section class="prompt-section">
-      <label for="promptInput">Your prompt</label>
-      <textarea
-        id="promptInput"
-        placeholder="Ask something… all selected members will answer."
-        rows="2"
-      ></textarea>
-      <div class="prompt-actions">
-        <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,text/*" multiple hidden />
-        <button type="button" class="upload-btn" id="uploadBtn" title="Attach images, PDF, or text">
-          <svg class="upload-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          Upload
-        </button>
-        <button type="button" class="submit-btn" id="submitBtn" disabled>
-          Send to selected members
-        </button>
-        <button type="button" class="return-to-response-btn" id="returnToResponseBtn" hidden>
-          Return to Response
-        </button>
-      </div>
-      <div class="attachments-list" id="attachmentsList" hidden></div>
+    <section class="home-actions">
+      <a href="/create.html" class="btn-launch-council home-create-btn">Create New Council</a>
     </section>
-
-    <section class="results-section" id="resultsSection" hidden>
-      <h2>Responses</h2>
-      <div class="results-list" id="resultsList"></div>
-    </section>
-
-  <div class="overlay responses-overlay" id="responsesOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="responsesOverlayTitle">
-    <div class="responses-overlay-backdrop" id="responsesOverlayBackdrop"></div>
-    <div class="responses-overlay-panel">
-      <div class="responses-overlay-header">
-        <h2 class="responses-overlay-title" id="responsesOverlayTitle">Council responses</h2>
-        <button type="button" class="responses-overlay-close" id="responsesOverlayClose" aria-label="Close">×</button>
-      </div>
-      <div class="responses-overlay-grid" id="responsesOverlayGrid"></div>
-      <div class="follow-up-prompt-box" id="followUpPromptBox" hidden>
-        <label for="followUpInput" class="follow-up-prompt-label">Ask a follow-up question to this member</label>
-        <textarea id="followUpInput" rows="2" placeholder="Type your follow-up question…"></textarea>
-        <div class="follow-up-prompt-actions">
-          <button type="button" class="btn-secondary" id="followUpCancel">Cancel</button>
-          <button type="button" class="submit-btn" id="followUpSend">Send follow-up</button>
-        </div>
-      </div>
-    </div>
   </div>
-
-    <div class="status" id="status" aria-live="polite"></div>
-  </div>
-
-  <div class="overlay council-loading-overlay" id="councilLoading" hidden aria-live="polite" aria-busy="true">
-    <div class="council-loading-backdrop"></div>
-    <div class="council-loading-panel">
-      <div class="council-loading-spinner"></div>
-      <p class="council-loading-message" id="councilLoadingMessage">Council members are thinking…</p>
-      <div class="council-loading-bar-wrap" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading">
-        <div class="council-loading-bar" id="councilLoadingBar"></div>
-      </div>
-      <p class="council-loading-step" id="councilLoadingStep"></p>
-    </div>
-  </div>
-
-  <div class="overlay" id="sendToOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="sendToOverlayTitle">
-    <div class="overlay-backdrop" id="sendToOverlayBackdrop"></div>
-    <div class="overlay-panel">
-      <h2 class="overlay-title" id="sendToOverlayTitle">Who do you want to send this response to?</h2>
-      <div class="send-to-list" id="sendToList"></div>
-      <div class="overlay-actions">
-        <button type="button" class="btn-secondary" id="sendToCancel">Cancel</button>
-        <button type="button" class="submit-btn" id="sendToConfirm">Send</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="app.js"></script>
+  <script src="home.js"></script>
 </body>
 </html>

@@ -11,18 +11,22 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
 
 // On Vercel, ALL requests are rewritten to /api?__path=... so the single function handles both API and static. Restore req.url.
 if (process.env.VERCEL) {
-  const API_SEGMENTS = new Set(["gems", "chat", "chats"]);
+  const API_SEGMENTS = new Set(["gems", "chat", "chats", "projects"]);
   app.use((req, res, next) => {
     const raw = req.query.__path;
     const pathSeg = raw === undefined ? "" : Array.isArray(raw) ? raw[0] : raw;
     delete req.query.__path;
     if (pathSeg === "") {
       req.url = "/";
-    } else if (API_SEGMENTS.has(pathSeg) || pathSeg.startsWith("chats/")) {
+    } else if (
+      API_SEGMENTS.has(pathSeg) ||
+      pathSeg.startsWith("chats/") ||
+      pathSeg.startsWith("creator/")
+    ) {
       req.url = "/api/" + pathSeg;
     } else {
       req.url = "/" + pathSeg;
@@ -63,6 +67,23 @@ const PORT = process.env.PORT || 3000;
 // Folder where Gem documents live. Put your PDFs, TXT, etc. here and reference them in GEMS[].documents.
 const DOCUMENTS_DIR = path.join(process.cwd(), "documents");
 
+/** Same basename as in GEMS[].documents; browser opens via GET /document/project-brief */
+const PROJECT_BRIEF_PDF = "Project Brief_Our Golden Record Draft 1.pdf";
+
+app.get("/document/project-brief", (req, res) => {
+  const filePath = path.join(DOCUMENTS_DIR, PROJECT_BRIEF_PDF);
+  if (!fs.existsSync(filePath)) {
+    return res
+      .status(404)
+      .type("text/plain")
+      .send(
+        "Project Brief PDF not found. Add Project Brief_Our Golden Record Draft 1.pdf to the documents folder."
+      );
+  }
+  res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(PROJECT_BRIEF_PDF)}`);
+  res.type("application/pdf").sendFile(path.resolve(filePath));
+});
+
 const MIME_BY_EXT = {
   ".pdf": "application/pdf",
   ".txt": "text/plain",
@@ -98,7 +119,7 @@ const GEMS = [
     "ADA-Compliant-Math-Standards.pdf",
     "AllDCI.pdf",
     "ELA_Standards1.pdf",
-    "Project Brief_Our Golden Record Draft 1.pdf",
+    PROJECT_BRIEF_PDF,
     "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
     "ss-framework-k-12-intro.pdf",
   ] },
@@ -106,7 +127,7 @@ const GEMS = [
     "ADA-Compliant-Math-Standards.pdf",
     "AllDCI.pdf",
     "ELA_Standards1.pdf",
-    "Project Brief_Our Golden Record Draft 1.pdf",
+    PROJECT_BRIEF_PDF,
     "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
     "ss-framework-k-12-intro.pdf",
   ] },
@@ -114,7 +135,7 @@ const GEMS = [
     "ADA-Compliant-Math-Standards.pdf",
     "AllDCI.pdf",
     "ELA_Standards1.pdf",
-    "Project Brief_Our Golden Record Draft 1.pdf",
+    PROJECT_BRIEF_PDF,
     "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
     "ss-framework-k-12-intro.pdf",
   ] },
@@ -122,7 +143,7 @@ const GEMS = [
     "ADA-Compliant-Math-Standards.pdf",
     "AllDCI.pdf",
     "ELA_Standards1.pdf",
-    "Project Brief_Our Golden Record Draft 1.pdf",
+    PROJECT_BRIEF_PDF,
     "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
     "ss-framework-k-12-intro.pdf",
   ] },
@@ -130,7 +151,7 @@ const GEMS = [
     "ADA-Compliant-Math-Standards.pdf",
     "AllDCI.pdf",
     "ELA_Standards1.pdf",
-    "Project Brief_Our Golden Record Draft 1.pdf",
+    PROJECT_BRIEF_PDF,
     "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
     "ss-framework-k-12-intro.pdf",
   ] },
@@ -214,6 +235,344 @@ async function getLocationFromRequest(req) {
   }
 }
 
+function parseJsonFromModelText(text) {
+  if (!text || typeof text !== "string") return null;
+  const trimmed = text.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    return JSON.parse(trimmed.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+async function geminiGenerateText(ai, userPrompt, systemInstruction) {
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: userPrompt,
+    config: systemInstruction ? { systemInstruction } : undefined,
+  });
+  return response?.text ?? "";
+}
+
+app.get("/api/projects", (req, res) => {
+  res.json({
+    projects: [
+      {
+        id: "golden-record",
+        title: "Our Golden Record AI Council",
+        description: "Interdisciplinary PBL — community record for the ages.",
+        href: "/golden-record.html",
+        builtin: true,
+      },
+    ],
+  });
+});
+
+app.post("/api/creator/suggest-phases", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const { projectTitle = "", projectSummary = "", essentialQuestion = "", objectives = [] } = req.body || {};
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const prompt = `You help teachers design PBL project phases. Based on the following, propose 3–5 sequential project phases. Each phase needs a short title and a one-line description/deliverable.
+
+Project title: ${projectTitle}
+Essential question (if any): ${essentialQuestion || "(not specified)"}
+Summary / brief excerpt: ${projectSummary}
+Learning objectives (list): ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+
+Reply with ONLY valid JSON (no markdown):
+{"phases":[{"title":"string","description":"string"}]}`;
+  try {
+    const text = await geminiGenerateText(ai, prompt);
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed?.phases || !Array.isArray(parsed.phases)) {
+      return res.status(422).json({ error: "Could not parse phases.", raw: text.slice(0, 500) });
+    }
+    res.json({ phases: parsed.phases });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/suggest-members", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const {
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    objectives = [],
+    phases = [],
+    memberCount = 4,
+  } = req.body || {};
+  const count = Math.min(6, Math.max(2, Number(memberCount) || 4));
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const phaseStr = Array.isArray(phases)
+    ? phases.map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`).join("\n")
+    : "";
+  const prompt = `Design exactly ${count} distinct stakeholder roles for a student project-based learning (PBL) "AI council" — adults/experts who advise students. Every role must be fully specified: no placeholders, no "TBD", no "Pending".
+
+Project title: ${projectTitle}
+Essential question (if any): ${essentialQuestion || "(not specified)"}
+Context: ${projectSummary}
+Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+Phases:
+${phaseStr}
+
+Requirements for ALL ${count} members:
+- Each needs a specific, memorable first name (or first + last) and a clear job title. **No two members may cover the same primary angle**—spread expertise across distinct domains (e.g. only one "science" lens, one community/cultural lens, one literacy/communication lens, one ethics or civics lens, one design or technical lens, etc.). If the project needs overlap, differentiate sharply in audience or method (e.g. field biologist vs data analyst).
+- Each systemInstruction must be a concise paragraph: how they advise students, tone supportive coach, grade 6–8, mostly questions and prompts rather than lectures.
+- Roles must complement each other (collectively cover the project) and align with the phases and objectives above.
+
+Reply with ONLY valid JSON. The "members" array MUST contain exactly ${count} objects:
+{"members":[{"name":"string","jobTitle":"string","systemInstruction":"string"}, ...]}`;
+  try {
+    const text = await geminiGenerateText(ai, prompt);
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed?.members || !Array.isArray(parsed.members)) {
+      return res.status(422).json({ error: "Could not parse members.", raw: text.slice(0, 500) });
+    }
+    const members = parsed.members.slice(0, count);
+    while (members.length < count) {
+      members.push({
+        name: "TBD",
+        jobTitle: "Pending",
+        systemInstruction: "Click the refresh button on this card to generate this role, or run Generate roles from template again.",
+      });
+    }
+    res.json({ members });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/regenerate-member", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const {
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    objectives = [],
+    phases = [],
+    existingNames = [],
+    otherMembers = [],
+  } = req.body || {};
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const avoid = Array.isArray(existingNames) ? existingNames.filter(Boolean).join(", ") : "";
+  const phaseStr = Array.isArray(phases)
+    ? phases.map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`).join("\n")
+    : "";
+  const siblingBlock =
+    Array.isArray(otherMembers) && otherMembers.length > 0
+      ? otherMembers
+          .map((o) => {
+            const jt = typeof o?.jobTitle === "string" ? o.jobTitle.trim() : "";
+            const nm = typeof o?.name === "string" ? o.name.trim() : "";
+            return jt || nm ? `- ${nm || "Member"} — ${jt || "Advisor"}` : null;
+          })
+          .filter(Boolean)
+          .join("\n")
+      : "";
+  const coverageInstruction = siblingBlock
+    ? `
+
+These roles are ALREADY filled by OTHER council members (do not duplicate their core expertise, discipline, or stakeholder angle):
+${siblingBlock}
+
+Your NEW role must fill a clear **gap**: a different discipline, community voice, skill set, or function that is not already represented above (e.g. if STEM and writing exist, add ethics, indigenous knowledge, facilitation, arts, family engagement, logistics, etc.—whatever best fits the project and is still missing).`
+    : "";
+
+  const prompt = `Create ONE new AI council member role for this PBL project. Use a different name than: ${avoid}.
+${coverageInstruction}
+
+Project: ${projectSummary}
+Title: ${projectTitle}
+Essential question (if any): ${essentialQuestion || "(not specified)"}
+Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+Phases: ${phaseStr}
+
+Reply with ONLY valid JSON:
+{"name":"string","jobTitle":"string","systemInstruction":"string"}`;
+  try {
+    const text = await geminiGenerateText(ai, prompt);
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed?.name || !parsed?.jobTitle) {
+      return res.status(422).json({ error: "Could not parse member.", raw: text.slice(0, 500) });
+    }
+    res.json({
+      name: parsed.name,
+      jobTitle: parsed.jobTitle,
+      systemInstruction: parsed.systemInstruction || "",
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/local-expert", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const { roleTitle = "", projectTitle = "", projectSummary = "", essentialQuestion = "", excludeExperts = [] } = req.body || {};
+  const excludeList = Array.isArray(excludeExperts)
+    ? excludeExperts
+        .filter((e) => typeof e === "string" && e.trim())
+        .map((e) => e.trim())
+        .slice(0, 40)
+    : [];
+  const excludeBlock = excludeList.length
+    ? `
+
+CRITICAL — Do NOT suggest anyone or any organization listed below (already shown). Pick a clearly different person, program, or organization:
+
+${excludeList.map((e) => `- ${e}`).join("\n")}`
+    : "";
+  const locationStr = await getLocationFromRequest(req);
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const prompt = `The educator's approximate location (from **IP-based geolocation** of their browser request—city/region/country when available) is: ${locationStr}.
+
+Suggest ONE real-world contact for students that fits the **council role** and project below. Follow this priority:
+
+1) **Geography first:** Prefer a specific person (name + title) or organization in **or near** that region—university, museum, tribal office, nonprofit, school district, or community program students could realistically reach out to.
+
+2) **If a strong local match is unlikely** for this niche (e.g. rare specialty, no relevant org in the area): choose someone who **best matches the council role and project** even if they are farther away (another state/country). In that case, still give real contact pathways; you may briefly note the distance if helpful.
+
+If you cannot name a verified individual, name the organization and a relevant department or program, and describe how to reach them.
+${excludeBlock}
+
+Project: ${projectTitle}
+Essential question (if any): ${essentialQuestion || "(not specified)"}
+Council role: ${roleTitle}
+Context: ${projectSummary}
+
+Reply with ONLY valid JSON (no markdown):
+{"name":"string — full name or best available label","organization":"string — school, nonprofit, tribal office, museum, etc.","title":"string — role or program","contact":"string — phone, email, and/or website; say verify online if unsure","imageUrl":""}
+
+For imageUrl: use an empty string unless you are confident in a direct https URL to an official photo or logo image from that organization; do not invent URLs.`;
+  try {
+    const text = await geminiGenerateText(ai, prompt);
+    const parsed = parseJsonFromModelText(text);
+    const name = parsed?.name || parsed?.displayName;
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(422).json({ error: "Could not parse expert.", raw: text.slice(0, 500) });
+    }
+    res.json({
+      name: name.trim(),
+      organization: typeof parsed.organization === "string" ? parsed.organization.trim() : "",
+      title: typeof parsed.title === "string" ? parsed.title.trim() : typeof parsed.subtitle === "string" ? parsed.subtitle.trim() : "",
+      contact: typeof parsed.contact === "string" ? parsed.contact.trim() : "",
+      imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl.trim() : "",
+      regionHint: locationStr,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+function normalizeBriefMimeType(fileName, mimeType) {
+  const m = (mimeType || "").toLowerCase();
+  if (m && m !== "application/octet-stream") return mimeType;
+  const n = (fileName || "").toLowerCase();
+  if (n.endsWith(".pdf")) return "application/pdf";
+  if (n.endsWith(".md")) return "text/markdown";
+  if (n.endsWith(".txt")) return "text/plain";
+  if (n.endsWith(".html") || n.endsWith(".htm")) return "text/html";
+  if (n.endsWith(".csv")) return "text/csv";
+  return mimeType || "application/pdf";
+}
+
+app.post("/api/creator/analyze-brief", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const { brief } = req.body || {};
+  const data = brief?.data;
+  if (!data || typeof data !== "string") {
+    return res.status(400).json({ error: "Brief file data (base64) required." });
+  }
+
+  const name = brief?.name || "brief";
+  const mimeType = normalizeBriefMimeType(name, brief?.mimeType);
+  const lowerMime = mimeType.toLowerCase();
+  const ok =
+    lowerMime.includes("pdf") ||
+    lowerMime.includes("text") ||
+    lowerMime.includes("markdown") ||
+    lowerMime.includes("html") ||
+    lowerMime.includes("csv");
+  if (!ok) {
+    return res.status(400).json({ error: "Unsupported brief type. Use PDF, TXT, MD, or HTML." });
+  }
+
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const systemInstruction =
+    "You analyze PBL and project-brief documents for teachers. Reply with only valid JSON, no markdown fences.";
+
+  const userPrompt = `Read the attached project brief file (${name}).
+
+Extract:
+
+1) **title**: The clearest project title—unit title, driving question as a short headline, or project name. Use JSON null only if nothing usable appears.
+
+2) **essentialQuestion**: The unit’s essential question or driving question that frames student work—the “big” question students keep returning to. In **PBL Works**–style briefs, this is often the question under **Project Launch** (sometimes near **Entry Event** or **Challenging Problem**). Copy it verbatim when possible; otherwise summarize in one sentence. Use JSON null only if no such question appears (do not invent one).
+
+3) **objectives**: An array of 2–6 learning objectives as clear, student-facing sentences. Use this priority:
+   - Explicit learning objectives, outcomes, or standards bullets if listed
+   - For PBL Works–style or similar briefs: treat questions, prompts, or bullets under sections such as **Build Knowledge**, **Develop & Critique**, **Need to Know**, **Sustained Inquiry**, or **Challenging Problem** as source material—rewrite each into one concise objective
+   - Otherwise infer objectives from stated outcomes elsewhere in the document
+
+Strings must not contain raw newlines; use spaces. Escape double quotes inside strings.
+
+Reply with ONLY valid JSON:
+{"title":"string or null","essentialQuestion":"string or null","objectives":["..."]}`;
+
+  try {
+    const filePart = createPartFromBase64(data, mimeType);
+    const contents = createUserContent([filePart, userPrompt]);
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+      config: { systemInstruction },
+    });
+    const text = response?.text ?? "";
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed || typeof parsed !== "object") {
+      return res.status(422).json({ error: "Could not parse brief analysis.", raw: text.slice(0, 800) });
+    }
+    let title =
+      parsed.title === null || parsed.title === undefined
+        ? null
+        : String(parsed.title).replace(/\s+/g, " ").trim() || null;
+    if (title && title.length > 200) title = title.slice(0, 197) + "…";
+
+    let objectives = Array.isArray(parsed.objectives)
+      ? parsed.objectives
+          .map((o) => String(o || "").replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+      : [];
+    if (objectives.length > 8) objectives = objectives.slice(0, 8);
+
+    let essentialQuestion =
+      parsed.essentialQuestion === null || parsed.essentialQuestion === undefined
+        ? null
+        : String(parsed.essentialQuestion).replace(/\s+/g, " ").trim() || null;
+    if (essentialQuestion && essentialQuestion.length > 500) {
+      essentialQuestion = essentialQuestion.slice(0, 497) + "…";
+    }
+
+    res.json({ title, essentialQuestion, objectives });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
 // In-memory store for saved chats (use a DB in production)
 const savedChats = [];
 let chatIdCounter = 1;
@@ -241,7 +600,7 @@ app.post("/api/chats", (req, res) => {
     results: results.map((r) => ({
       gemId: r.gemId,
       name: r.name,
-      jobTitle: JOB_TITLES[r.name] || r.name,
+      jobTitle: r.jobTitle || JOB_TITLES[r.name] || r.name,
       response: r.response,
       error: r.error,
     })),
@@ -268,6 +627,147 @@ app.get("/api/chats/:id", (req, res) => {
   const chat = savedChats.find((c) => c.id === req.params.id);
   if (!chat) return res.status(404).json({ error: "Chat not found." });
   res.json(chat);
+});
+
+function buildCustomCouncilContext(councilProject) {
+  const cp = councilProject && typeof councilProject === "object" ? councilProject : {};
+  const title = cp.projectTitle || "Project";
+  const eq =
+    typeof cp.essentialQuestion === "string" && cp.essentialQuestion.trim()
+      ? cp.essentialQuestion.trim()
+      : "";
+  const objectives = Array.isArray(cp.learningObjectives)
+    ? cp.learningObjectives.filter(Boolean).join("; ")
+    : "";
+  const phases = Array.isArray(cp.phases)
+    ? cp.phases
+        .map((p, i) => `Phase ${i + 1}: ${(p && p.title) || ""} — ${(p && p.description) || ""}`)
+        .join("\n")
+    : "";
+  const eqLine = eq ? `Essential question: ${eq}\n` : "";
+  return `[Project context]\nTitle: ${title}\n${eqLine}Learning objectives: ${objectives}\nPhases:\n${phases}\n`;
+}
+
+app.post("/api/chat/custom", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY. Add it to .env and restart." });
+  }
+
+  const {
+    councilProject,
+    selectedGems = [],
+    prompt,
+    attachments: rawAttachments,
+    followUpPreviousResponse,
+    opinionOnResponse,
+  } = req.body || {};
+
+  const members = Array.isArray(councilProject?.members) ? councilProject.members : [];
+  if (!members.length) {
+    return res.status(400).json({ error: "Invalid council project." });
+  }
+  if (!Array.isArray(selectedGems) || selectedGems.length === 0) {
+    return res.status(400).json({ error: "Select at least one council member." });
+  }
+
+  const promptText = typeof prompt === "string" ? prompt.trim() : "";
+  const hasAttachments = Array.isArray(rawAttachments) && rawAttachments.length > 0;
+  if (!promptText && !hasAttachments) {
+    return res.status(400).json({ error: "Prompt or at least one attachment is required." });
+  }
+
+  let userPrompt = promptText || "(The user sent the following files with no additional text.)";
+  let wordLimit = 260;
+  if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
+    userPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${userPrompt}`;
+    wordLimit = 150;
+  } else if (opinionOnResponse) {
+    userPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${userPrompt}`;
+    wordLimit = 200;
+  }
+
+  const locationStr = await getLocationFromRequest(req);
+  const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits, university departments with relevant experts, or non-profits. For the resource: (1) Always hyperlink the website—use a full URL (https://...) for any site you mention. (2) Include a phone number and email address when you can find them. (3) When possible, name a specific contact person. Keep this section concise.]`;
+  userPrompt = userPrompt + resourceInstruction;
+
+  const projectContext = buildCustomCouncilContext(councilProject);
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+
+  const attachmentParts = [];
+  if (hasAttachments) {
+    for (const a of rawAttachments) {
+      if (a && typeof a.data === "string" && a.mimeType) {
+        attachmentParts.push(createPartFromBase64(a.data, a.mimeType));
+      }
+    }
+  }
+
+  const selectedSet = new Set(selectedGems.map((id) => Number(id)));
+  const toRun = members.filter((m) => m && selectedSet.has(Number(m.id)) && !m.isHuman);
+  const humanSelected = members.filter((m) => m && selectedSet.has(Number(m.id)) && m.isHuman);
+
+  const results = [];
+
+  for (const hm of humanSelected) {
+    const hc = hm.humanContact || {};
+    const lines = [
+      "This slot is reserved for a human advisor or community expert (not an AI).",
+      hc.name || hm.name ? `Suggested contact: ${hc.name || hm.name}` : "",
+      hc.organization ? `Organization: ${hc.organization}` : "",
+      hc.title || hm.title ? `Title: ${hc.title || hm.title}` : "",
+      hc.phone ? `Phone: ${hc.phone}` : "",
+      hc.email ? `Email: ${hc.email}` : "",
+      hc.website ? `Website: ${hc.website}` : "",
+      hm.localExpert && hm.localExpert.contact ? `Notes: ${hm.localExpert.contact}` : "",
+    ].filter(Boolean);
+    results.push({
+      gemId: hm.id,
+      name: hm.name || "Human advisor",
+      jobTitle: hm.jobTitle || "",
+      response: lines.join("\n"),
+      error: null,
+      isHuman: true,
+    });
+  }
+
+  await Promise.all(
+    toRun.map(async (gem) => {
+      try {
+        const model = gem.model || "gemini-2.5-flash";
+        const allParts = [...attachmentParts, projectContext + "\n" + userPrompt];
+        const contents = allParts.length > 1 ? createUserContent(allParts) : projectContext + "\n" + userPrompt;
+        const responseInstruction =
+          (gem.systemInstruction || "") +
+          `\n\n${projectContext}\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: { systemInstruction: responseInstruction },
+        });
+        const text = response?.text ?? "";
+        results.push({
+          gemId: gem.id,
+          name: gem.name,
+          jobTitle: gem.jobTitle || "",
+          response: text,
+          error: null,
+          isHuman: false,
+        });
+      } catch (err) {
+        results.push({
+          gemId: gem.id,
+          name: gem.name,
+          jobTitle: gem.jobTitle || "",
+          response: null,
+          error: err?.message || String(err),
+          isHuman: false,
+        });
+      }
+    })
+  );
+
+  results.sort((a, b) => Number(a.gemId) - Number(b.gemId));
+  res.json({ results });
 });
 
 app.post("/api/chat", async (req, res) => {

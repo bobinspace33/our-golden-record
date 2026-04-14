@@ -18,6 +18,7 @@ const councilLoading = document.getElementById("councilLoading");
 const councilLoadingMessage = document.getElementById("councilLoadingMessage");
 const fileInput = document.getElementById("fileInput");
 const uploadBtn = document.getElementById("uploadBtn");
+const phaseMilestoneTitle = document.getElementById("phaseMilestoneTitle");
 const attachmentsList = document.getElementById("attachmentsList");
 const responsesOverlay = document.getElementById("responsesOverlay");
 const responsesOverlayBackdrop = document.getElementById("responsesOverlayBackdrop");
@@ -133,8 +134,125 @@ let sendToSource = null; // { gemId, name, response } when overlay is open
 let sendToSelectedIds = new Set();
 let attachments = []; // { name, mimeType, data (base64) }
 
+const APP_KIND = document.body.dataset.app || "golden-record";
+let customCouncilProject = null;
+
+function gemThumbSrc(image) {
+  if (!image) return "";
+  const s = String(image).trim();
+  if (/^https?:\/\//i.test(s) || s.startsWith("//") || s.startsWith("data:")) return s;
+  if (s.startsWith("/")) return s;
+  return "/" + s;
+}
+
+/** Initials avatar when remote portraits fail (invalid model URLs, Pollinations hiccups, etc.). */
+function uiAvatarFallbackSrc(name) {
+  const label = encodeURIComponent((name || "?").slice(0, 42));
+  return `https://ui-avatars.com/api/?name=${label}&size=256&background=1e3a5f&color=fff`;
+}
+
+/**
+ * If profile image fails to load, swap to a reliable initials avatar.
+ * For custom councils, persist the working URL so reloads stay fixed.
+ */
+function bindGemAvatarFallback(img, displayName, gemId) {
+  if (!img) return;
+  img.addEventListener("error", () => {
+    if (img.dataset.avatarFallbackApplied === "1") return;
+    img.dataset.avatarFallbackApplied = "1";
+    const fb = uiAvatarFallbackSrc(displayName);
+    img.removeAttribute("srcset");
+    img.src = fb;
+    if (
+      APP_KIND === "custom" &&
+      gemId != null &&
+      customCouncilProject?.members?.length
+    ) {
+      const mm = customCouncilProject.members.find((m) => Number(m.id) === Number(gemId));
+      if (mm && mm.image !== fb) {
+        mm.image = fb;
+        persistCustomCouncil();
+      }
+      const g = gems.find((x) => Number(x.id) === Number(gemId));
+      if (g) g.image = fb;
+    }
+  });
+}
+
+function chatPayload(body) {
+  if (APP_KIND === "custom" && customCouncilProject) {
+    return { ...body, councilProject: customCouncilProject };
+  }
+  return body;
+}
+
+function getCustomMember(gemId) {
+  return customCouncilProject?.members?.find((m) => Number(m.id) === Number(gemId));
+}
+
+function persistCustomCouncil() {
+  if (APP_KIND === "custom" && customCouncilProject) {
+    try {
+      sessionStorage.setItem("aiCouncilActiveProject", JSON.stringify(customCouncilProject));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function loadSavedProjectIntoSession(savedId) {
+  if (!savedId) return;
+  try {
+    const raw = localStorage.getItem("aiCouncilSavedProjects");
+    const list = raw ? JSON.parse(raw) : [];
+    const item = Array.isArray(list) ? list.find((x) => x.id === savedId) : null;
+    if (item?.config) {
+      sessionStorage.setItem("aiCouncilActiveProject", JSON.stringify(item.config));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function buildPhaseSectionFromProject() {
+  const optionsEl = document.querySelector(".phase-options");
+  if (!optionsEl || !customCouncilProject?.phases?.length) return;
+  const phases = customCouncilProject.phases;
+  optionsEl.innerHTML = phases
+    .map(
+      (_, i) =>
+        `<label class="phase-option"><input type="radio" name="projectPhase" value="${i + 1}" ${i === 0 ? "checked" : ""} /> ${i + 1}</label>`
+    )
+    .join("");
+  document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
+    radio.addEventListener("change", onPhaseChange);
+  });
+  const briefLink = document.getElementById("customProjectBriefLink");
+  const att = customCouncilProject.briefAttachment;
+  if (briefLink && att?.data) {
+    briefLink.href = `data:${att.mimeType || "application/pdf"};base64,${att.data}`;
+    briefLink.download = att.name || "project-brief.pdf";
+    briefLink.target = "_blank";
+    briefLink.rel = "noopener noreferrer";
+    briefLink.hidden = false;
+  }
+}
+
 // Phase 1: Jane only. 2: Jane, Carl, Henrietta. 3: + Wolfgang. 4: all.
 function getEnabledMemberIds(phase) {
+  if (APP_KIND === "custom" && customCouncilProject?.members?.length) {
+    const idx = Number(phase) - 1;
+    const enabled = new Set();
+    customCouncilProject.members.forEach((m) => {
+      const pe = Array.isArray(m.phasesEnabled) ? m.phasesEnabled : [];
+      if (idx < 0 || idx >= pe.length) {
+        enabled.add(m.id);
+        return;
+      }
+      if (pe[idx]) enabled.add(m.id);
+    });
+    return enabled;
+  }
   const map = {
     1: [2],
     2: [2, 5, 1],
@@ -147,6 +265,25 @@ function getEnabledMemberIds(phase) {
 function getProjectPhase() {
   const r = document.querySelector('input[name="projectPhase"]:checked');
   return r ? r.value : "1";
+}
+
+const PHASE_MILESTONE_LABELS = {
+  1: "Community Charter",
+  2: "Artifact Curation",
+  3: "Logistics Audit",
+  4: "Golden Record Premiere",
+};
+
+function syncPhaseMilestoneTitle() {
+  if (!phaseMilestoneTitle) return;
+  const phase = getProjectPhase();
+  if (APP_KIND === "custom" && customCouncilProject && Array.isArray(customCouncilProject.phases)) {
+    const idx = Number(phase) - 1;
+    const p = customCouncilProject.phases[idx];
+    phaseMilestoneTitle.textContent = p ? p.title || `Phase ${phase}` : "—";
+    return;
+  }
+  phaseMilestoneTitle.textContent = PHASE_MILESTONE_LABELS[phase] || PHASE_MILESTONE_LABELS[1];
 }
 
 function setStatus(message, type = "") {
@@ -171,13 +308,90 @@ function renderGems() {
   gems.forEach((gem) => {
     const enabled = enabledIds.has(gem.id);
     const card = document.createElement("div");
-    card.className = "gem-card" + (selectedIds.has(gem.id) ? " selected" : "") + (enabled ? "" : " disabled");
-    card.dataset.colorIndex = String(gem.id);
+    const isHuman = APP_KIND === "custom" && gem.isHuman;
+    card.className =
+      "gem-card" +
+      (selectedIds.has(gem.id) ? " selected" : "") +
+      (enabled ? "" : " disabled") +
+      (isHuman ? " gem-card-human" : "");
+    card.dataset.colorIndex = String(((Number(gem.id) - 1) % 5) + 1);
+    const imgSrc = gemThumbSrc(gem.image);
+    const imgHtml = imgSrc ? `<img class="gem-card-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="lazy" />` : "";
+
+    if (isHuman) {
+      const m = getCustomMember(gem.id);
+      const hc = m?.humanContact || {};
+      card.setAttribute("role", "group");
+      card.innerHTML = `
+        <div class="gem-card-inner">
+          <div class="gem-human-front">
+            <label class="gem-include"><input type="checkbox" class="gem-select-cb" ${selectedIds.has(gem.id) ? "checked" : ""} /> Include</label>
+            ${imgHtml}
+            <span class="gem-name">${escapeHtml(gem.name)}</span>
+            <span class="gem-job-title">${escapeHtml(gem.jobTitle || "")}</span>
+            <span class="gem-flip-hint">Click card to edit contact</span>
+          </div>
+          <div class="gem-human-back" hidden>
+            <input type="text" data-hc="name" placeholder="Name" value="${escapeHtml(hc.name || gem.name || "")}" />
+            <input type="text" data-hc="title" placeholder="Title" value="${escapeHtml(hc.title || gem.jobTitle || "")}" />
+            <input type="text" data-hc="organization" placeholder="Organization" value="${escapeHtml(hc.organization || "")}" />
+            <input type="text" data-hc="phone" placeholder="Phone" value="${escapeHtml(hc.phone || "")}" />
+            <input type="text" data-hc="email" placeholder="Email" value="${escapeHtml(hc.email || "")}" />
+            <input type="text" data-hc="website" placeholder="Website" value="${escapeHtml(hc.website || "")}" />
+            <button type="button" class="btn-mini gem-flip-done">Done</button>
+          </div>
+        </div>
+      `;
+      const cb = card.querySelector(".gem-select-cb");
+      const front = card.querySelector(".gem-human-front");
+      const back = card.querySelector(".gem-human-back");
+      if (cb) {
+        cb.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (cb.checked) selectedIds.add(gem.id);
+          else selectedIds.delete(gem.id);
+          setSubmitState();
+        });
+      }
+      card.querySelectorAll(".gem-human-back [data-hc]").forEach((inp) => {
+        inp.addEventListener("input", () => {
+          const mm = getCustomMember(gem.id);
+          if (!mm) return;
+          if (!mm.humanContact) mm.humanContact = {};
+          mm.humanContact[inp.dataset.hc] = inp.value;
+          persistCustomCouncil();
+        });
+      });
+      const toggleFlip = (showBack) => {
+        if (front) front.hidden = !!showBack;
+        if (back) back.hidden = !showBack;
+        card.classList.toggle("flipped", !!showBack);
+      };
+      card.addEventListener("click", (e) => {
+        if (!enabled) return;
+        if (e.target.closest(".gem-select-cb") || e.target.closest("input[data-hc]") || e.target.closest(".gem-flip-done")) {
+          return;
+        }
+        if (back && !back.hidden) return;
+        if (e.target.closest(".gem-human-back")) return;
+        toggleFlip(true);
+      });
+      card.querySelector(".gem-flip-done")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleFlip(false);
+      });
+      if (enabled) {
+        card.tabIndex = 0;
+      } else {
+        card.tabIndex = -1;
+      }
+      bindGemAvatarFallback(card.querySelector(".gem-card-thumb"), gem.name, gem.id);
+      gemsGrid.appendChild(card);
+      return;
+    }
+
     card.setAttribute("role", "button");
     card.tabIndex = enabled ? 0 : -1;
-    const imgHtml = gem.image
-      ? `<img class="gem-card-thumb" src="/${escapeHtml(gem.image)}" alt="" loading="lazy" />`
-      : "";
     card.innerHTML = `
       ${imgHtml}
       <span class="gem-name">${escapeHtml(gem.name)}</span>
@@ -200,6 +414,7 @@ function renderGems() {
         }
       });
     }
+    bindGemAvatarFallback(card.querySelector(".gem-card-thumb"), gem.name, gem.id);
     gemsGrid.appendChild(card);
   });
 }
@@ -662,7 +877,8 @@ function openResponsesOverlay(results, options = {}) {
   responsesOverlayGrid.innerHTML = "";
   const n = results.length;
   results.forEach(({ gemId, name, response, error, jobTitle }) => {
-    const colors = MEMBER_COLORS[gemId] || MEMBER_COLORS[2];
+    const colorKey = ((Number(gemId) - 1) % 5) + 1;
+    const colors = MEMBER_COLORS[colorKey] || MEMBER_COLORS[2];
     const title = jobTitle || jobTitleMap[name] || "";
     const card = document.createElement("div");
     card.className = "response-overlay-card";
@@ -671,8 +887,10 @@ function openResponsesOverlay(results, options = {}) {
     card.style.setProperty("--member-bg", colors.bg);
     card.style.setProperty("--member-fg", colors.fg);
     card.style.setProperty("--member-card", colors.card);
-    const imgSrc = gems.find((g) => g.id === gemId)?.image;
-    const imgHtml = imgSrc ? `<img class="response-overlay-thumb" src="/${escapeHtml(imgSrc)}" alt="" />` : "";
+    const gFound = gems.find((g) => g.id === gemId);
+    const imgSrc = gFound?.image;
+    const thumb = imgSrc ? gemThumbSrc(imgSrc) : "";
+    const imgHtml = thumb ? `<img class="response-overlay-thumb" src="${escapeHtml(thumb)}" alt="" />` : "";
     card.innerHTML = `
       <div class="response-overlay-card-header">
         <div class="response-overlay-card-meta">
@@ -689,6 +907,7 @@ function openResponsesOverlay(results, options = {}) {
     const body = card.querySelector(".response-overlay-card-body");
     const textEl = card.querySelector(".response-overlay-text");
     const actionsEl = card.querySelector(".response-overlay-actions");
+    bindGemAvatarFallback(card.querySelector(".response-overlay-thumb"), name, gemId);
     if (error) {
       if (textEl) textEl.textContent = "";
     } else if (textEl && response) {
@@ -706,7 +925,7 @@ function openResponsesOverlay(results, options = {}) {
       saveBtn.addEventListener("click", () => { saveCurrentChat(); });
       actionsEl.appendChild(saveBtn);
     }
-    if (!error && response) {
+    if (!error && response && !gFound?.isHuman) {
       const sendBtn = document.createElement("button");
       sendBtn.type = "button";
       sendBtn.className = "btn-send-to response-overlay-btn";
@@ -748,6 +967,7 @@ function renderResults(results, options = {}) {
   const { showSaveButton = true, jobTitleMap = {}, followUpsByGemId = {} } = options;
   resultsList.innerHTML = "";
   results.forEach(({ gemId, name, response, error, jobTitle }) => {
+    const gFound = gems.find((g) => g.id === gemId);
     const title = jobTitle || jobTitleMap[name] || "";
     const card = document.createElement("div");
     card.className = "result-card";
@@ -776,7 +996,7 @@ function renderResults(results, options = {}) {
         saveBtn.addEventListener("click", () => saveCurrentChat());
         actions.appendChild(saveBtn);
       }
-      if (!error && response) {
+      if (!error && response && !gFound?.isHuman) {
         const sendBtn = document.createElement("button");
         sendBtn.type = "button";
         sendBtn.className = "btn-send-to";
@@ -842,7 +1062,7 @@ function saveCurrentChat() {
 function openSendToOverlay(source) {
   sendToSource = source;
   sendToSelectedIds = new Set();
-  const others = gems.filter((g) => g.id !== source.gemId);
+  const others = gems.filter((g) => g.id !== source.gemId && !g.isHuman);
   sendToList.innerHTML = "";
   others.forEach((gem) => {
     const item = document.createElement("button");
@@ -877,19 +1097,29 @@ function confirmSendTo() {
   }
   const sourceGemId = sendToSource.gemId;
   const prompt = sendToSource.response;
-  const selectedIdsForRequest = Array.from(sendToSelectedIds);
+  const selectedIdsForRequest = Array.from(sendToSelectedIds).filter((id) => {
+    const g = gems.find((x) => x.id === id);
+    return g && !g.isHuman;
+  });
+  if (selectedIdsForRequest.length === 0) {
+    closeSendToOverlay();
+    setStatus("Choose at least one AI member to respond.", "error");
+    return;
+  }
   sendToConfirm.disabled = true;
   closeSendToOverlay();
   setStatus("");
   startCouncilLoading();
-  fetch("/api/chat", {
+  fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      selectedGems: selectedIdsForRequest,
-      opinionOnResponse: true,
-    }),
+    body: JSON.stringify(
+      chatPayload({
+        prompt,
+        selectedGems: selectedIdsForRequest,
+        opinionOnResponse: true,
+      })
+    ),
   })
     .then((r) => r.json())
     .then((data) => {
@@ -933,17 +1163,24 @@ if (followUpSend) {
     if (!currentFollowUp || !followUpInput) return;
     const question = followUpInput.value.trim();
     if (!question) return;
+    const fuGem = gems.find((g) => g.id === currentFollowUp.gemId);
+    if (fuGem?.isHuman) {
+      setStatus("Follow-up applies to AI members only.", "error");
+      return;
+    }
     followUpSend.disabled = true;
     setStatus("");
     startCouncilLoading();
-    fetch("/api/chat", {
+    fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        selectedGems: [currentFollowUp.gemId],
-        prompt: question,
-        followUpPreviousResponse: currentFollowUp.response,
-      }),
+      body: JSON.stringify(
+        chatPayload({
+          selectedGems: [currentFollowUp.gemId],
+          prompt: question,
+          followUpPreviousResponse: currentFollowUp.response,
+        })
+      ),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -1044,10 +1281,10 @@ async function submit() {
       prompt: prompt || "(See attached files.)",
       attachments: attachments.length > 0 ? attachments.map((a) => ({ name: a.name, mimeType: a.mimeType, data: a.data })) : undefined,
     };
-    const res = await fetch("/api/chat", {
+    const res = await fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(chatPayload(body)),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -1078,6 +1315,36 @@ async function submit() {
 }
 
 async function loadGems() {
+  if (APP_KIND === "custom") {
+    const params = new URLSearchParams(window.location.search);
+    loadSavedProjectIntoSession(params.get("saved"));
+    let raw = sessionStorage.getItem("aiCouncilActiveProject");
+    try {
+      customCouncilProject = raw ? JSON.parse(raw) : null;
+    } catch {
+      customCouncilProject = null;
+    }
+    if (!customCouncilProject?.members?.length) {
+      window.location.href = "/";
+      return;
+    }
+    const titleEl = document.getElementById("councilPageTitle");
+    if (titleEl) titleEl.textContent = customCouncilProject.projectTitle || "Your AI Council";
+    buildPhaseSectionFromProject();
+    gems = customCouncilProject.members.map((m) => ({
+      id: m.id,
+      name: m.name,
+      jobTitle: m.jobTitle,
+      image: m.image || null,
+      isHuman: !!m.isHuman,
+    }));
+    selectedIds = new Set(gems.filter((g) => !g.isHuman).map((g) => g.id));
+    renderGems();
+    syncPhaseMilestoneTitle();
+    setSubmitState();
+    return;
+  }
+
   try {
     const res = await fetch("/api/gems");
     const data = await res.json();
@@ -1092,6 +1359,7 @@ async function loadGems() {
     ];
   }
   renderGems();
+  syncPhaseMilestoneTitle();
   setSubmitState();
 }
 
@@ -1101,6 +1369,7 @@ function onPhaseChange() {
   selectedIds.forEach((id) => {
     if (!enabledIds.has(id)) selectedIds.delete(id);
   });
+  syncPhaseMilestoneTitle();
   renderGems();
   setSubmitState();
 }

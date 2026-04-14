@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create AI Council</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="creator.css" />
+</head>
+<body class="creator-body">
+  <div class="layout layout-wide">
+    <nav class="site-nav" aria-label="Site">
+      <a href="/" class="site-nav-link">← All councils</a>
+    </nav>
+
+    <header class="creator-header">
+      <h1>Create New Council</h1>
+      <p class="tagline">Describe your PBL unit. The assistant will suggest phases and council roles you can refine.</p>
+    </header>
+
+    <form id="creatorForm" class="creator-form" onsubmit="return false;">
+      <section class="creator-block">
+        <label class="creator-label" for="projectTitle">Project title</label>
+        <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">1. Project brief</h2>
+        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline (PDF or text). If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
+        <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file (embedded). Upload a new file to replace it.</p>
+        <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,text/*" class="creator-file" />
+        <label class="creator-label" for="projectSummary">Summary for AI (paste key points if the file is large)</label>
+        <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the project brief…"></textarea>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">2. Essential question</h2>
+        <p class="creator-hint">
+          The driving question that frames the unit. Uploading a project brief can fill this automatically—for example, the question under <strong>Project Launch</strong> on PBL Works templates.
+        </p>
+        <label class="creator-label" for="essentialQuestion">Essential question</label>
+        <textarea
+          id="essentialQuestion"
+          class="creator-textarea"
+          rows="2"
+          placeholder="e.g. How can our community tell its story to the world in a way that includes every voice?"
+        ></textarea>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">3. Supporting documents</h2>
+        <p class="creator-hint">Standards, rubrics, or context (PDF, TXT, MD, CSV, HTML).</p>
+        <input type="file" id="supportingFiles" accept=".pdf,.txt,.md,.csv,.html,text/*" multiple class="creator-file" />
+        <ul class="creator-file-list" id="supportingFileList"></ul>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">4. Learning objectives</h2>
+        <p class="creator-hint">2–4 objectives recommended. Uploading a project brief (above) can auto-fill objectives—for example, from PBL Works sections like “Build Knowledge” and “Develop &amp; Critique.”</p>
+        <div id="objectivesList" class="objectives-list"></div>
+        <button type="button" class="btn-secondary" id="addObjectiveBtn">+ Add objective</button>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">5. Project phases</h2>
+        <div class="creator-toolbar">
+          <button type="button" class="btn-secondary" id="suggestPhasesBtn">Suggest phases from summary</button>
+        </div>
+        <div class="phases-grid" id="phasesGrid"></div>
+        <button type="button" class="btn-secondary" id="addPhaseBtn">+ Add phase row</button>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">6. Council members</h2>
+        <p class="creator-hint">Between 2 and 6 AI advisors. The first two can be filled automatically from your template.</p>
+        <div class="creator-toolbar">
+          <label>Council size
+            <select id="memberCount" class="creator-select">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </label>
+          <button type="button" class="btn-secondary" id="suggestMembersBtn">Generate roles from template</button>
+        </div>
+        <div id="memberCards" class="member-cards"></div>
+      </section>
+
+      <section class="creator-block">
+        <h2 class="creator-block-title">7. Project settings</h2>
+        <p class="creator-hint">More options will be added later.</p>
+        <div class="settings-grid" id="settingsGrid"></div>
+      </section>
+
+      <div class="creator-launch-wrap">
+        <div class="creator-draft-toolbar">
+          <button type="button" class="btn-secondary" id="saveDraftBtn">Save draft</button>
+          <p class="draft-status" id="draftStatus" aria-live="polite"></p>
+        </div>
+        <button type="button" class="btn-launch-council" id="launchCouncilBtn">Launch Council</button>
+        <p class="creator-error" id="creatorError" hidden></p>
+      </div>
+    </form>
+  </div>
+
+  <div
+    class="overlay council-loading-overlay"
+    id="creatorLoadingOverlay"
+    hidden
+    aria-live="polite"
+    aria-busy="false"
+    aria-label="Loading"
+  >
+    <div class="council-loading-backdrop"></div>
+    <div class="council-loading-panel" role="status">
+      <div class="council-loading-spinner" aria-hidden="true"></div>
+      <p class="council-loading-message" id="creatorLoadingMessage">Working…</p>
+      <p class="creator-loading-sub" id="creatorLoadingSub">The assistant is processing your request.</p>
+    </div>
+  </div>
+
+  <div
+    class="local-expert-modal-overlay"
+    id="localExpertModal"
+    hidden
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="localExpertModalTitle"
+  >
+    <div class="local-expert-modal-backdrop" data-close-lem="1"></div>
+    <div class="local-expert-modal-panel">
+      <h2 class="local-expert-modal-title" id="localExpertModalTitle">Local expert</h2>
+      <div class="local-expert-modal-loading" id="localExpertModalLoading" hidden>
+        <div class="council-loading-spinner" aria-hidden="true"></div>
+        <p id="lemLoadingMessage">Finding a local expert…</p>
+      </div>
+      <div class="local-expert-modal-body" id="localExpertModalBody">
+        <div class="local-expert-modal-visual">
+          <img class="local-expert-modal-photo" id="lemPhoto" alt="" width="120" height="120" />
+        </div>
+        <dl class="local-expert-modal-dl">
+          <div><dt>Name</dt><dd id="lemName"></dd></div>
+          <div><dt>Organization</dt><dd id="lemOrganization"></dd></div>
+          <div><dt>Title</dt><dd id="lemTitle"></dd></div>
+          <div><dt>Contact</dt><dd id="lemContact" class="lem-contact"></dd></div>
+        </dl>
+      </div>
+      <p class="local-expert-modal-prompt" id="localExpertModalPrompt">Include in Council?</p>
+      <p class="local-expert-modal-hint" id="localExpertModalHint">
+        Yes replaces the AI member in this slot with this contact. No keeps the AI member.
+      </p>
+      <div class="local-expert-modal-actions" id="localExpertModalActions">
+        <button type="button" class="btn-secondary icon-btn-refresh" id="lemSearchAgain" title="Search for another expert" aria-label="Search for another expert">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M23 4v6h-6M1 20v-6h6" />
+            <path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+        <button type="button" class="btn-secondary" id="lemNo">No</button>
+        <button type="button" class="btn-launch-council" id="lemYes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="create-council.js"></script>
+</body>
+</html>

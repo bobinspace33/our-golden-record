@@ -196,6 +196,28 @@ h2 {
   align-items: center;
   gap: 1rem;
   margin-bottom: 1.25rem;
+  width: 100%;
+}
+
+.project-brief-btn {
+  margin-left: auto;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, filter 0.15s;
+  white-space: nowrap;
+}
+
+.project-brief-btn:hover {
+  filter: brightness(1.12);
+  border-color: var(--accent);
 }
 
 .phase-label {
@@ -203,7 +225,7 @@ h2 {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-muted);
+  color: var(--accent);
 }
 
 .phase-options {
@@ -218,7 +240,7 @@ h2 {
   gap: 0.4rem;
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--text);
+  color: var(--accent);
   cursor: pointer;
 }
 
@@ -227,6 +249,13 @@ h2 {
   height: 18px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+.phase-milestone-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.01em;
 }
 
 .gems-section {
