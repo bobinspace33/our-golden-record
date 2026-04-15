@@ -316,7 +316,10 @@ function renderGems() {
       (isHuman ? " gem-card-human" : "");
     card.dataset.colorIndex = String(((Number(gem.id) - 1) % 5) + 1);
     const imgSrc = gemThumbSrc(gem.image);
-    const imgHtml = imgSrc ? `<img class="gem-card-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="lazy" />` : "";
+    const pollinationsThumb = /^https?:\/\/image\.pollinations\.ai\//i.test(imgSrc);
+    const imgHtml = imgSrc
+      ? `<img class="gem-card-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="${pollinationsThumb ? "eager" : "lazy"}" />`
+      : "";
 
     if (isHuman) {
       const m = getCustomMember(gem.id);

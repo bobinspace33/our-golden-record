@@ -50,6 +50,89 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+/** Unisex / ambiguous given names → neutral portrait cues */
+const PORTRAIT_AMBIGUOUS_NAMES = new Set([
+  "alex", "avery", "blair", "cameron", "casey", "corey", "devon", "drew", "ellis", "frankie",
+  "harper", "jamie", "jordan", "kendall", "kim", "lee", "logan", "morgan", "parker", "pat", "quinn",
+  "reese", "remy", "riley", "robin", "rowan", "sam", "skyler", "sydney", "taylor", "terry",
+]);
+
+const PORTRAIT_FEMALE_NAMES = new Set([
+  "ada", "aida", "aisha", "alicia", "alina", "allison", "alyssa", "amanda", "amelia", "amy", "ana",
+  "andrea", "angela", "anna", "anne", "aria", "ashley", "astrid", "athena", "audrey", "ava", "beatrice",
+  "beth", "brenda", "brianna", "bridget", "carla", "carmen", "carol", "caroline", "catherine", "charlotte",
+  "chloe", "claire", "danielle", "diana", "donna", "elena", "elizabeth", "ella", "ellen", "emily", "emma",
+  "erica", "erin", "esther", "eva", "evelyn", "fatima", "fiona", "gabriela", "grace", "greta", "hannah",
+  "heather", "helen", "helena", "henrietta", "holly", "iris", "isabel", "isabella", "ivy", "jade",
+  "jane", "janet", "jasmine", "jennifer", "jessica", "joan", "julia", "julie", "june", "karen", "kate",
+  "katherine", "katie", "kayla", "kelly", "kimberly", "laura", "lauren", "layla", "leah", "lena", "lily",
+  "linda", "lisa", "lucy", "lydia", "margaret", "maria", "marie", "marina", "martha", "mary", "maya",
+  "megan", "melissa", "mia", "michelle", "min", "molly", "monica", "naomi", "natalie", "nicole", "nina",
+  "nora", "olivia", "patricia", "priya", "rachel", "rebecca", "rosa", "rose", "ruby", "ruth", "sandra",
+  "sara", "sarah", "sophia", "sophie", "stella", "stephanie", "susan", "tamara", "tanya", "tara", "theresa",
+  "valerie", "vanessa", "vera", "victoria", "violet", "vivian", "wendy", "yasmin", "yuki", "zoe", "zara",
+]);
+
+const PORTRAIT_MALE_NAMES = new Set([
+  "adam", "ahmed", "ahsan", "alan", "albert", "alejandro", "alexander", "ali", "allen", "andre", "andrew",
+  "anthony", "antonio", "arthur", "benjamin", "brian", "bruce", "carl", "carlos", "charles", "chris",
+  "christopher", "craig", "daniel", "darnell", "david", "derek", "diego", "donald", "douglas", "edward",
+  "eric", "ethan", "eugene", "felix", "francisco", "frank", "fred", "gary", "george", "gerald", "gregory",
+  "harold", "harry", "henry", "howard", "ian", "isaac", "jack", "jacob", "james", "jason", "jeffrey",
+  "jeremy", "jerry", "jesse", "jim", "joe", "john", "jonathan", "jorge", "jose", "joseph", "joshua",
+  "juan", "justin", "keith", "kenneth", "kevin", "larry", "lawrence", "liam", "louis", "lucas", "marcus",
+  "mark", "martin", "marvin", "matthew", "michael", "miguel", "mohammed", "nathan", "nelson", "nicholas",
+  "noah", "omar", "oscar", "patrick", "paul", "pedro", "peter", "philip", "ralph", "raymond", "richard",
+  "robert", "roger", "ronald", "ross", "roy", "ryan", "samuel", "scott", "sean", "stephen", "steven",
+  "thomas", "timothy", "tyler", "victor", "vincent", "walter", "wayne", "william", "wolfgang", "zac",
+  "zachary",
+]);
+
+function firstGivenNameToken(name) {
+  if (!name || typeof name !== "string") return "";
+  const cleaned = name.replace(/^[^a-zA-Z]+/, "").trim();
+  if (!cleaned) return "";
+  const parts = cleaned.split(/[\s,]+/).filter(Boolean);
+  if (!parts.length) return "";
+  let first = parts[0].replace(/[^a-zA-Z'-]/g, "").toLowerCase().replace(/\.+$/, "");
+  const honor = new Set(["dr", "prof", "mr", "mrs", "ms", "mx", "sir", "madam"]);
+  if (honor.has(first) && parts.length > 1) {
+    first = parts[1].replace(/[^a-zA-Z'-]/g, "").toLowerCase().replace(/\.+$/, "");
+  }
+  return first;
+}
+
+function parsePortraitGender(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (s === "female" || s === "woman" || s === "f") return "female";
+  if (s === "male" || s === "man" || s === "m") return "male";
+  if (s === "neutral" || s === "nonbinary" || s === "nb" || s === "enby" || s === "none") return "neutral";
+  return null;
+}
+
+function inferPortraitGenderFromName(name) {
+  const first = firstGivenNameToken(name);
+  if (!first) return "neutral";
+  if (PORTRAIT_AMBIGUOUS_NAMES.has(first)) return "neutral";
+  if (PORTRAIT_MALE_NAMES.has(first)) return "male";
+  if (PORTRAIT_FEMALE_NAMES.has(first)) return "female";
+  return "neutral";
+}
+
+function effectivePortraitGender(stored, name) {
+  return parsePortraitGender(stored) ?? inferPortraitGenderFromName(name);
+}
+
+function portraitGenderPromptCue(gender) {
+  if (gender === "female") {
+    return "adult woman mentor, clearly feminine face and styling appropriate for a 90s cartoon heroine";
+  }
+  if (gender === "male") {
+    return "adult man mentor, clearly masculine face and styling appropriate for a 90s cartoon hero";
+  }
+  return "adult mentor with soft, inclusive androgynous presentation (avoid strong gender stereotypes)";
+}
+
 function getEssentialQuestion() {
   return document.getElementById("essentialQuestion")?.value?.trim() || "";
 }
@@ -194,6 +277,7 @@ function applyExpertToMember(idx, data) {
     regionHint: n.regionHint,
   };
   m.isHuman = true;
+  m.portraitGender = null;
   m.name = display;
   m.jobTitle = n.title || n.organization || m.jobTitle;
   m.systemInstruction =
@@ -259,10 +343,16 @@ async function localExpertSearchAgain() {
 }
 
 /** Full-color 90s Captain Planet–style cartoon portrait (Pollinations). Used when roles are generated. */
-function captainPlanetPortraitUrl(name, jobTitle, seedNum) {
+function captainPlanetPortraitUrl(name, jobTitle, seedNum, portraitGender, memberIndex) {
   const nameSafe = (name || "Council member").slice(0, 65);
   const roleSafe = (jobTitle || "Advisor").slice(0, 85);
   const seed = Number.isFinite(Number(seedNum)) ? Number(seedNum) : Math.floor(Math.random() * 1e9);
+  const idx = Number.isFinite(Number(memberIndex)) ? Number(memberIndex) : 0;
+  const gender =
+    portraitGender === "female" || portraitGender === "male" || portraitGender === "neutral"
+      ? portraitGender
+      : effectivePortraitGender(null, name);
+  const genderCue = portraitGenderPromptCue(gender);
   const palettes = [
     "emerald green gold and earth brown costume accents",
     "sky blue silver and white Planeteer style",
@@ -276,17 +366,21 @@ function captainPlanetPortraitUrl(name, jobTitle, seedNum) {
     `Full color cartoon illustration, 1990s Saturday morning TV animation, Captain Planet and the Planeteers art style, ` +
     `vibrant saturated colors, thick black outlines, simple cel shading, heroic eco-team character design, ` +
     `colorful costume with ${palette}, friendly expressive mentor face, ` +
+    `${genderCue}, ` +
     `character ${nameSafe}, role ${roleSafe}, ` +
+    `composition variant ${idx + 1}, ` +
     `head and shoulders portrait, soft gradient background, no text, no letters, no watermark, no logos`;
   const encoded = encodeURIComponent(prompt.slice(0, 1100));
-  return `https://image.pollinations.ai/prompt/${encoded}?width=320&height=320&seed=${seed}&nologo=true`;
+  const nonce = encodeURIComponent(`${idx}-${Math.abs(seed) % 1e9}`);
+  return `https://image.pollinations.ai/prompt/${encoded}?width=320&height=320&seed=${seed}&nologo=true&nonce=${nonce}`;
 }
 
 function applyCaptainPlanetPortraits() {
   state.useCaptainPlanetPortraits = true;
   state.members.forEach((m, i) => {
     if (!m.isHuman) {
-      m.image = captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97);
+      const g = effectivePortraitGender(m.portraitGender, m.name);
+      m.image = captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97, g, i);
     }
   });
 }
@@ -303,6 +397,7 @@ function syncMemberCount() {
       systemInstruction: "",
       model: "gemini-2.5-flash",
       image: avatarUrl(`id${id}`),
+      portraitGender: null,
       phasesEnabled: state.phases.map(() => true),
       isHuman: false,
       humanContact: { name: "", title: "", organization: "", phone: "", email: "", website: "" },
@@ -430,8 +525,12 @@ function renderMemberCards() {
       if (field === "name" || field === "jobTitle") {
         const m = state.members[i];
         if (!m.isHuman) {
+          if (field === "name") {
+            m.portraitGender = inferPortraitGenderFromName(m.name);
+          }
+          const g = effectivePortraitGender(m.portraitGender, m.name);
           m.image = state.useCaptainPlanetPortraits
-            ? captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97)
+            ? captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97, g, i)
             : avatarUrl((m.name || `member${i}`).slice(0, 40));
           const img = wrap.querySelector(`[data-member-idx="${i}"] .creator-member-img`);
           if (img) img.src = m.image;
@@ -549,6 +648,7 @@ async function suggestMembers() {
           email: "",
           website: "",
         };
+        state.members[i].portraitGender = effectivePortraitGender(row.portraitGender, row.name);
       });
       applyCaptainPlanetPortraits();
       renderMemberCards();
@@ -598,10 +698,14 @@ async function regenerateMember(idx) {
     state.members[idx].systemInstruction = data.systemInstruction || "";
     state.members[idx].isHuman = false;
     state.useCaptainPlanetPortraits = true;
+    const regenGender = effectivePortraitGender(data.portraitGender, data.name);
+    state.members[idx].portraitGender = regenGender;
     state.members[idx].image = captainPlanetPortraitUrl(
       data.name,
       data.jobTitle,
-      state.members[idx].id * 7919 + idx * 131 + Date.now() % 10000
+      state.members[idx].id * 7919 + idx * 131 + Date.now() % 10000,
+      regenGender,
+      idx
     );
     state.members[idx].localExpert = null;
     state.members[idx].excludedLocalExperts = [];

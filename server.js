@@ -330,19 +330,31 @@ Requirements for ALL ${count} members:
 - Roles must complement each other (collectively cover the project) and align with the phases and objectives above.
 
 Reply with ONLY valid JSON. The "members" array MUST contain exactly ${count} objects:
-{"members":[{"name":"string","jobTitle":"string","systemInstruction":"string"}, ...]}`;
+{"members":[{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"}, ...]}
+
+For each member, portraitGender MUST reflect how the given name is most often read in English-speaking classrooms: "female" or "male" when the first/given name strongly suggests it, otherwise "neutral" (ambiguous names, initials-only, surnames-only, or honorific-only).`;
   try {
     const text = await geminiGenerateText(ai, prompt);
     const parsed = parseJsonFromModelText(text);
     if (!parsed?.members || !Array.isArray(parsed.members)) {
       return res.status(422).json({ error: "Could not parse members.", raw: text.slice(0, 500) });
     }
-    const members = parsed.members.slice(0, count);
+    const portraitOk = new Set(["female", "male", "neutral"]);
+    const members = parsed.members.slice(0, count).map((row) => {
+      const pg = String(row.portraitGender || "").trim().toLowerCase();
+      return {
+        name: row.name || "",
+        jobTitle: row.jobTitle || "",
+        systemInstruction: row.systemInstruction || "",
+        portraitGender: portraitOk.has(pg) ? pg : null,
+      };
+    });
     while (members.length < count) {
       members.push({
         name: "TBD",
         jobTitle: "Pending",
         systemInstruction: "Click the refresh button on this card to generate this role, or run Generate roles from template again.",
+        portraitGender: null,
       });
     }
     res.json({ members });
@@ -399,17 +411,22 @@ Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
 Phases: ${phaseStr}
 
 Reply with ONLY valid JSON:
-{"name":"string","jobTitle":"string","systemInstruction":"string"}`;
+{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"}
+
+portraitGender must match how the given name is most often read (female / male / neutral for ambiguous cases).`;
   try {
     const text = await geminiGenerateText(ai, prompt);
     const parsed = parseJsonFromModelText(text);
     if (!parsed?.name || !parsed?.jobTitle) {
       return res.status(422).json({ error: "Could not parse member.", raw: text.slice(0, 500) });
     }
+    const portraitOk = new Set(["female", "male", "neutral"]);
+    const pg = String(parsed.portraitGender || "").trim().toLowerCase();
     res.json({
       name: parsed.name,
       jobTitle: parsed.jobTitle,
       systemInstruction: parsed.systemInstruction || "",
+      portraitGender: portraitOk.has(pg) ? pg : null,
     });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
