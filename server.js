@@ -25,6 +25,7 @@ if (process.env.VERCEL) {
     } else if (
       API_SEGMENTS.has(pathSeg) ||
       pathSeg.startsWith("chats/") ||
+      pathSeg.startsWith("chat/") ||
       pathSeg.startsWith("creator/")
     ) {
       req.url = "/api/" + pathSeg;
