@@ -1601,6 +1601,42 @@ body[data-app="custom"] .upload-btn:hover {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
 }
 
+.replace-human-editor-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border-radius: inherit;
+}
+
+.replace-human-editor-loading[hidden] {
+  display: none !important;
+}
+
+.replace-human-editor-loading-inner {
+  text-align: center;
+  max-width: 17rem;
+}
+
+.replace-human-editor-loading-title {
+  margin: 0.35rem 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.replace-human-editor-loading-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 .replace-human-editor-header {
   display: flex;
   align-items: center;

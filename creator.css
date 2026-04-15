@@ -453,14 +453,31 @@ input.creator-file::file-selector-button:hover {
   font-weight: 600;
 }
 
+.local-expert-modal-panel--busy .local-expert-modal-title {
+  opacity: 0.4;
+}
+
 .local-expert-modal-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem 0;
+  gap: 0.65rem;
+  min-height: 9.5rem;
+  justify-content: center;
+  padding: 1.25rem 0.75rem;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.local-expert-modal-loading-sub {
+  margin: 0;
+  max-width: 17rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.45;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  text-align: center;
 }
 
 .local-expert-modal-body {

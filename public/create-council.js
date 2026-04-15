@@ -484,14 +484,24 @@ const localExpertModal = { memberIdx: null, data: null };
 function setLocalExpertLoadingMessage(isAnother) {
   const p = document.getElementById("lemLoadingMessage");
   if (p) p.textContent = isAnother ? "Finding another contact…" : "Finding a local expert…";
+  const sub = document.getElementById("lemLoadingSub");
+  if (sub) {
+    sub.textContent = isAnother
+      ? "Excluding people you already saw—we’re looking for a different match."
+      : "Using your project and approximate location. This can take up to a minute—please wait.";
+  }
 }
 
 function setLocalExpertModalLoading(loading) {
+  const modal = document.getElementById("localExpertModal");
+  const panel = modal?.querySelector?.(".local-expert-modal-panel");
   const loadEl = document.getElementById("localExpertModalLoading");
   const bodyEl = document.getElementById("localExpertModalBody");
   const actions = document.getElementById("localExpertModalActions");
   const prompt = document.getElementById("localExpertModalPrompt");
   const hint = document.getElementById("localExpertModalHint");
+  if (modal) modal.setAttribute("aria-busy", loading ? "true" : "false");
+  if (panel) panel.classList.toggle("local-expert-modal-panel--busy", loading);
   if (loadEl) loadEl.hidden = !loading;
   if (bodyEl) bodyEl.hidden = loading;
   if (prompt) prompt.hidden = loading;

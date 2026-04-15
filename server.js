@@ -68,28 +68,58 @@ const PORT = process.env.PORT || 3000;
 /** Gemini native image ("Nano Banana") — see https://ai.google.dev/gemini-api/docs/image-generation */
 const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image").trim();
 
+/** IDs that were preview names or typos — map to a current generateContent model. */
+const GEMINI_MODEL_ID_ALIASES = {
+  "gemini-3.1-flash": "gemini-2.5-flash",
+  "gemini-3-flash": "gemini-2.5-flash",
+  "gemini-3.1-pro": "gemini-2.5-pro",
+  "gemini-3-pro": "gemini-2.5-pro",
+};
+
+function normalizeGeminiModelId(modelId) {
+  const m = String(modelId || "").trim();
+  return GEMINI_MODEL_ID_ALIASES[m] || m;
+}
+
+function dedupeModelChain(ids) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of ids) {
+    const m = normalizeGeminiModelId(raw);
+    if (m && !seen.has(m)) {
+      seen.add(m);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
 /** Comma-separated Gemini model ids for creator JSON routes; next model is used on 429 / quota errors. */
-const GEMINI_CREATOR_MODEL_CHAIN = (
-  process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const GEMINI_CREATOR_MODEL_CHAIN = dedupeModelChain(
+  (process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 /**
  * Comma-separated model ids for /api/chat and /api/chat/custom (council messages).
  * Defaults to creator chain. First candidate is each member's configured model, then these (deduped).
  * Example: GEMINI_CHAT_MODEL_CHAIN=gemini-2.0-flash,gemini-2.5-flash-lite
  */
-const GEMINI_CHAT_MODEL_CHAIN = String(
-  process.env.GEMINI_CHAT_MODEL_CHAIN || process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite"
-)
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const GEMINI_CHAT_MODEL_CHAIN = dedupeModelChain(
+  String(
+    process.env.GEMINI_CHAT_MODEL_CHAIN ||
+      process.env.GEMINI_CREATOR_MODEL_CHAIN ||
+      "gemini-2.5-flash,gemini-2.5-flash-lite"
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 function chatModelCandidates(primaryModel) {
-  const p = (primaryModel || "gemini-2.5-flash").trim();
+  const p = normalizeGeminiModelId((primaryModel || "gemini-2.5-flash").trim());
   const out = [];
   const seen = new Set();
   for (const m of [p, ...GEMINI_CHAT_MODEL_CHAIN]) {
@@ -118,7 +148,9 @@ async function geminiGenerateContentWithModelFallback(ai, modelCandidates, gener
       });
     } catch (e) {
       lastErr = e;
-      const canTryNext = i < modelCandidates.length - 1 && isRetriableGeminiQuotaError(e);
+      const canTryNext =
+        i < modelCandidates.length - 1 &&
+        (isRetriableGeminiQuotaError(e) || isGeminiModelNotFoundOrUnsupportedError(e));
       if (canTryNext) {
         await new Promise((r) => setTimeout(r, 500));
         continue;
@@ -436,6 +468,21 @@ function isRetriableGeminiQuotaError(err) {
   return false;
 }
 
+/** Wrong model id or not available on this API — try the next model in the chain. */
+function isGeminiModelNotFoundOrUnsupportedError(err) {
+  if (!err) return false;
+  const nested = err?.error || err?.cause?.error;
+  const code = err.code ?? err.statusCode ?? nested?.code ?? err?.cause?.code ?? err?.status;
+  const statusStr = String(nested?.status || err?.status || err?.statusCode || "").toUpperCase();
+  const msg = String(err.message || err.toString?.() || err || "").toLowerCase();
+  if (code === 404 || nested?.code === 404) return true;
+  if (statusStr === "NOT_FOUND") return true;
+  if (msg.includes("is not supported for generatecontent")) return true;
+  if (msg.includes("not found for api version") && msg.includes("models/")) return true;
+  if (msg.includes("/models/") && msg.includes("not found")) return true;
+  return false;
+}
+
 async function geminiGenerateText(ai, userPrompt, systemInstruction) {
   const chain = GEMINI_CREATOR_MODEL_CHAIN.length ? GEMINI_CREATOR_MODEL_CHAIN : ["gemini-2.5-flash"];
   const tried = [];
@@ -465,7 +512,9 @@ async function geminiGenerateText(ai, userPrompt, systemInstruction) {
       return text;
     } catch (e) {
       lastErr = e;
-      const canTryNext = i < chain.length - 1 && isRetriableGeminiQuotaError(e);
+      const canTryNext =
+        i < chain.length - 1 &&
+        (isRetriableGeminiQuotaError(e) || isGeminiModelNotFoundOrUnsupportedError(e));
       if (canTryNext) {
         await new Promise((r) => setTimeout(r, 450));
         continue;

@@ -203,6 +203,27 @@ function pickLocalExpertImageForForm(data, displayName) {
   return uiAvatarFallbackSrc(displayName);
 }
 
+function setReplaceHumanSearchLoading(loading, isAnotherSearch) {
+  const loadEl = document.getElementById("replaceHumanSearchLoading");
+  const msgEl = document.getElementById("replaceHumanSearchLoadingMessage");
+  const subEl = document.getElementById("replaceHumanSearchLoadingSub");
+  const overlay = document.getElementById("replaceHumanEditorOverlay");
+  const panel = document.querySelector(".replace-human-editor-panel");
+  if (msgEl) {
+    msgEl.textContent = isAnotherSearch ? "Finding another contact…" : "Searching for a local expert…";
+  }
+  if (subEl) {
+    subEl.textContent =
+      "Using your project, location, and this seat’s role. This can take a little while—please wait.";
+  }
+  if (loadEl) {
+    loadEl.hidden = !loading;
+    loadEl.setAttribute("aria-hidden", loading ? "false" : "true");
+  }
+  if (overlay) overlay.setAttribute("aria-busy", loading ? "true" : "false");
+  if (panel) panel.classList.toggle("replace-human-editor-panel--searching", loading);
+}
+
 async function runReplaceHumanLocalSearch() {
   const btn = document.getElementById("replaceHumanSearchBtn");
   const gidAtStart = replaceHumanGemId;
@@ -215,7 +236,9 @@ async function runReplaceHumanLocalSearch() {
     setStatus("Could not find that council seat.", "error");
     return;
   }
+  const isAnother = replaceHumanSearchSessionExcluded.length > 0;
   if (btn) btn.disabled = true;
+  setReplaceHumanSearchLoading(true, isAnother);
   setStatus("Searching for a contact…", "");
   try {
     const projectTitle = String(customCouncilProject.projectTitle || "").trim();
@@ -274,6 +297,7 @@ async function runReplaceHumanLocalSearch() {
   } catch (e) {
     setStatus(e.message || String(e), "error");
   } finally {
+    setReplaceHumanSearchLoading(false, false);
     if (btn) btn.disabled = false;
   }
 }

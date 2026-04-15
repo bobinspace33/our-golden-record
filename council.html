@@ -193,6 +193,13 @@
   <div class="overlay replace-human-editor-overlay" id="replaceHumanEditorOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="replaceHumanEditorTitle">
     <div class="replace-human-editor-backdrop" id="replaceHumanEditorBackdrop"></div>
     <div class="replace-human-editor-panel">
+      <div class="replace-human-editor-loading" id="replaceHumanSearchLoading" hidden>
+        <div class="replace-human-editor-loading-inner" role="status" aria-live="polite">
+          <div class="council-loading-spinner" aria-hidden="true"></div>
+          <p class="replace-human-editor-loading-title" id="replaceHumanSearchLoadingMessage">Searching…</p>
+          <p class="replace-human-editor-loading-sub" id="replaceHumanSearchLoadingSub"></p>
+        </div>
+      </div>
       <div class="replace-human-editor-header">
         <div class="replace-human-editor-title-actions">
           <h2 class="replace-human-editor-title" id="replaceHumanEditorTitle">Human council member</h2>
