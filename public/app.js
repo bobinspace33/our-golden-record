@@ -778,71 +778,29 @@ function renderGems() {
         : "";
 
     if (isHuman) {
-      const m = getCustomMember(gem.id);
-      const hc = m?.humanContact || {};
-      card.setAttribute("role", "group");
+      card.setAttribute("role", "button");
+      card.tabIndex = enabled ? 0 : -1;
       card.innerHTML = `
-        <div class="gem-card-inner">
-          <div class="gem-human-front">
-            <label class="gem-include"><input type="checkbox" class="gem-select-cb" ${selectedIds.has(gem.id) ? "checked" : ""} /> Include</label>
-            ${imgHtml}
-            <span class="gem-name">${escapeHtml(gem.name)}</span>
-            <span class="gem-job-title">${escapeHtml(gem.jobTitle || "")}</span>
-            <span class="gem-flip-hint">Click card to edit contact</span>
-          </div>
-          <div class="gem-human-back" hidden>
-            <input type="text" data-hc="name" placeholder="Name" value="${escapeHtml(hc.name || gem.name || "")}" />
-            <input type="text" data-hc="title" placeholder="Title" value="${escapeHtml(hc.title || gem.jobTitle || "")}" />
-            <input type="text" data-hc="organization" placeholder="Organization" value="${escapeHtml(hc.organization || "")}" />
-            <input type="text" data-hc="phone" placeholder="Phone" value="${escapeHtml(hc.phone || "")}" />
-            <input type="text" data-hc="email" placeholder="Email" value="${escapeHtml(hc.email || "")}" />
-            <input type="text" data-hc="website" placeholder="Website" value="${escapeHtml(hc.website || "")}" />
-            <button type="button" class="btn-mini gem-flip-done">Done</button>
-          </div>
-        </div>
+        ${imgHtml}
+        <span class="gem-name">${escapeHtml(gem.name)}</span>
+        <span class="gem-job-title">${escapeHtml(gem.jobTitle || "")}</span>
       `;
-      const cb = card.querySelector(".gem-select-cb");
-      const front = card.querySelector(".gem-human-front");
-      const back = card.querySelector(".gem-human-back");
-      if (cb) {
-        cb.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (cb.checked) selectedIds.add(gem.id);
-          else selectedIds.delete(gem.id);
+      if (enabled) {
+        card.addEventListener("click", () => {
+          if (selectedIds.has(gem.id)) {
+            selectedIds.delete(gem.id);
+          } else {
+            selectedIds.add(gem.id);
+          }
+          renderGems();
           setSubmitState();
         });
-      }
-      card.querySelectorAll(".gem-human-back [data-hc]").forEach((inp) => {
-        inp.addEventListener("input", () => {
-          const mm = getCustomMember(gem.id);
-          if (!mm) return;
-          if (!mm.humanContact) mm.humanContact = {};
-          mm.humanContact[inp.dataset.hc] = inp.value;
-          persistCustomCouncil();
+        card.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            card.click();
+          }
         });
-      });
-      const toggleFlip = (showBack) => {
-        if (front) front.hidden = !!showBack;
-        if (back) back.hidden = !showBack;
-        card.classList.toggle("flipped", !!showBack);
-      };
-      card.addEventListener("click", (e) => {
-        if (!enabled) return;
-        if (e.target.closest(".gem-select-cb") || e.target.closest("input[data-hc]") || e.target.closest(".gem-flip-done")) {
-          return;
-        }
-        if (back && !back.hidden) return;
-        if (e.target.closest(".gem-human-back")) return;
-        toggleFlip(true);
-      });
-      card.querySelector(".gem-flip-done")?.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleFlip(false);
-      });
-      if (enabled) {
-        card.tabIndex = 0;
-      } else {
-        card.tabIndex = -1;
       }
       bindGemAvatarFallback(card.querySelector(".gem-card-thumb"), gem.name, gem.id);
       gemsGrid.appendChild(card);
