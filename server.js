@@ -64,6 +64,14 @@ app.get("/api/debug", (req, res) => {
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 const PORT = process.env.PORT || 3000;
 
+/** Comma-separated Gemini model ids for creator JSON routes; next model is used on 429 / quota errors. */
+const GEMINI_CREATOR_MODEL_CHAIN = (
+  process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 // Folder where Gem documents live. Put your PDFs, TXT, etc. here and reference them in GEMS[].documents.
 const DOCUMENTS_DIR = path.join(process.cwd(), "documents");
 
@@ -267,26 +275,67 @@ function extractTextFromGenaiResponse(response) {
   return parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("");
 }
 
+/** True when another model (or retry) might succeed — not for auth or bad requests. */
+function isRetriableGeminiQuotaError(err) {
+  if (!err) return false;
+  const msg = String(err.message || err.toString?.() || err || "").toLowerCase();
+  const code = err.code ?? err.status ?? err.statusCode ?? err?.error?.code ?? err?.cause?.code;
+  const status = err.status ?? err.statusCode ?? err?.error?.status;
+  if (code === 429 || status === 429) return true;
+  if (String(code) === "8") return true; // gRPC RESOURCE_EXHAUSTED
+  if (String(code).toUpperCase() === "RESOURCE_EXHAUSTED") return true;
+  if (msg.includes("resource_exhausted")) return true;
+  if (msg.includes("429")) return true;
+  if (msg.includes("quota")) return true;
+  if (msg.includes("rate limit")) return true;
+  if (msg.includes("too many requests")) return true;
+  if (msg.includes("exceeded your")) return true;
+  if (msg.includes("capacity")) return true;
+  return false;
+}
+
 async function geminiGenerateText(ai, userPrompt, systemInstruction) {
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: userPrompt,
-    config: systemInstruction ? { systemInstruction } : undefined,
-  });
-  const text = extractTextFromGenaiResponse(response);
-  if (!text.trim()) {
-    const block = response?.promptFeedback?.blockReason;
-    const finish = response?.candidates?.[0]?.finishReason;
-    const errMsg = block
-      ? `Gemini returned no text (prompt blocked: ${block}).`
-      : finish
-        ? `Gemini returned no text (finishReason: ${finish}).`
-        : "Gemini returned no text.";
-    const err = new Error(errMsg);
-    err.rawResponse = response;
-    throw err;
+  const chain = GEMINI_CREATOR_MODEL_CHAIN.length ? GEMINI_CREATOR_MODEL_CHAIN : ["gemini-2.5-flash"];
+  const tried = [];
+  let lastErr = null;
+  for (let i = 0; i < chain.length; i++) {
+    const model = chain[i];
+    tried.push(model);
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: userPrompt,
+        config: systemInstruction ? { systemInstruction } : undefined,
+      });
+      const text = extractTextFromGenaiResponse(response);
+      if (!text.trim()) {
+        const block = response?.promptFeedback?.blockReason;
+        const finish = response?.candidates?.[0]?.finishReason;
+        const errMsg = block
+          ? `Gemini returned no text (prompt blocked: ${block}).`
+          : finish
+            ? `Gemini returned no text (finishReason: ${finish}).`
+            : "Gemini returned no text.";
+        const err = new Error(errMsg);
+        err.rawResponse = response;
+        throw err;
+      }
+      return text;
+    } catch (e) {
+      lastErr = e;
+      const canTryNext = i < chain.length - 1 && isRetriableGeminiQuotaError(e);
+      if (canTryNext) {
+        await new Promise((r) => setTimeout(r, 450));
+        continue;
+      }
+      throw e;
+    }
   }
-  return text;
+  const wrapped = new Error(
+    lastErr ? `${lastErr.message || lastErr} (tried: ${tried.join(", ")})` : `Gemini failed (tried: ${tried.join(", ")})`
+  );
+  if (lastErr) wrapped.cause = lastErr;
+  throw wrapped;
 }
 
 app.get("/api/projects", (req, res) => {
@@ -308,6 +357,7 @@ app.get("/api/creator/health", (req, res) => {
   res.json({
     ok: true,
     hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
+    creatorModelChain: GEMINI_CREATOR_MODEL_CHAIN,
     vercel: Boolean(process.env.VERCEL),
     node: process.version,
   });
