@@ -1610,10 +1610,32 @@ body[data-app="custom"] .upload-btn:hover {
   border-bottom: 1px solid var(--border);
 }
 
+.replace-human-editor-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
+}
+
 .replace-human-editor-title {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
+}
+
+.replace-human-search-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.replace-human-search-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .replace-human-editor-close {

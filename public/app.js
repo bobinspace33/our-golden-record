@@ -147,6 +147,136 @@ const HUMAN_ADVISOR_SYSTEM_INSTRUCTION =
 
 let replaceHumanGemId = null;
 let replaceHumanPendingImage = null;
+/** Dedupe keys (`name | org`) for experts shown this modal session; each Search excludes these plus member.excludedLocalExperts. */
+let replaceHumanSearchSessionExcluded = [];
+
+function resetReplaceHumanSearchSession() {
+  replaceHumanSearchSessionExcluded = [];
+}
+
+function normalizeLocalExpertResponse(j) {
+  if (!j || typeof j !== "object") {
+    return { name: "", organization: "", title: "", contact: "", imageUrl: "", regionHint: "" };
+  }
+  return {
+    name: String(j.name || j.displayName || "").trim(),
+    organization: String(j.organization || "").trim(),
+    title: String(j.title || j.subtitle || "").trim(),
+    contact: String(j.contact || "").trim(),
+    imageUrl: String(j.imageUrl || "").trim(),
+    regionHint: String(j.regionHint || "").trim(),
+  };
+}
+
+function localExpertDedupeKey(expert) {
+  const n = normalizeLocalExpertResponse(expert);
+  const nameT = n.name;
+  const orgT = n.organization;
+  if (!nameT && !orgT) return "";
+  return [nameT, orgT].filter(Boolean).join(" | ");
+}
+
+function splitContactIntoFields(contact) {
+  const s = String(contact || "").trim();
+  let email = "";
+  const em = s.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i);
+  if (em) email = em[0];
+  const urls = [];
+  for (const m of s.matchAll(/https?:\/\/[^\s\],)>'"]+/gi)) {
+    const u = m[0].replace(/[.,;:)\]}>'"]+$/, "");
+    if (u) urls.push(u);
+  }
+  const website = urls[0] || "";
+  let remainder = s;
+  if (email) remainder = remainder.replace(new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "");
+  if (website) remainder = remainder.split(website).join("");
+  remainder = remainder.replace(/\s+/g, " ").replace(/[|,;]+/g, " ").trim();
+  const phoneRe = /(\+?\d[\d\s().\-/]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]?\d{4})/;
+  const pm = remainder.match(phoneRe);
+  const phone = pm ? pm[0].trim() : "";
+  return { email, website, phone };
+}
+
+function pickLocalExpertImageForForm(data, displayName) {
+  const raw = String(data.imageUrl || "").trim();
+  if (raw && /^https?:\/\//i.test(raw)) return raw;
+  return uiAvatarFallbackSrc(displayName);
+}
+
+async function runReplaceHumanLocalSearch() {
+  const btn = document.getElementById("replaceHumanSearchBtn");
+  const gidAtStart = replaceHumanGemId;
+  if (APP_KIND !== "custom" || !customCouncilProject || gidAtStart == null) {
+    setStatus("Search is only available for your project council.", "error");
+    return;
+  }
+  const mm = getCustomMember(gidAtStart);
+  if (!mm) {
+    setStatus("Could not find that council seat.", "error");
+    return;
+  }
+  if (btn) btn.disabled = true;
+  setStatus("Searching for a contact…", "");
+  try {
+    const projectTitle = String(customCouncilProject.projectTitle || "").trim();
+    const projectSummary = String(customCouncilProject.projectSummary || "").trim();
+    const essentialQuestion = String(customCouncilProject.essentialQuestion || "").trim();
+    const gem = gems.find((g) => Number(g.id) === Number(gidAtStart));
+    const roleTitle = String(gem?.jobTitle || mm.jobTitle || "Advisor").trim() || "Advisor";
+    const persisted = Array.isArray(mm.excludedLocalExperts) ? mm.excludedLocalExperts : [];
+    const excludeExperts = [
+      ...new Set(
+        [...persisted, ...replaceHumanSearchSessionExcluded]
+          .map((x) => String(x || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+    const res = await fetch("/api/creator/local-expert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectTitle,
+        projectSummary,
+        essentialQuestion,
+        roleTitle,
+        excludeExperts,
+      }),
+    });
+    const raw = await res.json();
+    if (!res.ok) throw new Error(raw.error || "Request failed");
+    const data = normalizeLocalExpertResponse(raw);
+    if (!data.name) throw new Error("Could not parse expert.");
+    if (Number(replaceHumanGemId) !== Number(gidAtStart)) return;
+    const key = localExpertDedupeKey(data);
+    if (key && !replaceHumanSearchSessionExcluded.includes(key)) {
+      replaceHumanSearchSessionExcluded.push(key);
+    }
+    const displayName = data.name;
+    const split = splitContactIntoFields(data.contact);
+    const nameEl = document.getElementById("rhName");
+    const titleEl = document.getElementById("rhTitle");
+    const orgEl = document.getElementById("rhOrganization");
+    const emailEl = document.getElementById("rhEmail");
+    const phoneEl = document.getElementById("rhPhone");
+    const webEl = document.getElementById("rhWebsite");
+    const urlEl = document.getElementById("rhProfileUrl");
+    if (nameEl) nameEl.value = displayName;
+    if (titleEl) titleEl.value = data.title || "";
+    if (orgEl) orgEl.value = data.organization || "";
+    if (emailEl) emailEl.value = split.email || "";
+    if (phoneEl) phoneEl.value = split.phone || "";
+    if (webEl) webEl.value = split.website || "";
+    replaceHumanPendingImage = null;
+    const imgUrl = pickLocalExpertImageForForm(data, displayName);
+    if (urlEl) urlEl.value = /^https?:\/\//i.test(imgUrl) ? imgUrl : "";
+    updateReplaceHumanProfilePreview(imgUrl);
+    setStatus("Form filled from search—verify details before outreach.", "success");
+  } catch (e) {
+    setStatus(e.message || String(e), "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 function gemThumbSrc(image) {
   if (!image) return "";
@@ -886,6 +1016,7 @@ function dismissReplaceHumanPreconfirm() {
 }
 
 function populateReplaceHumanEditorFromGem() {
+  resetReplaceHumanSearchSession();
   const gid = replaceHumanGemId;
   const gem = gems.find((g) => Number(g.id) === Number(gid));
   const mm = getCustomMember(gid);
@@ -918,6 +1049,7 @@ function closeReplaceHumanEditor() {
   if (el) el.hidden = true;
   replaceHumanGemId = null;
   replaceHumanPendingImage = null;
+  resetReplaceHumanSearchSession();
   updateReplaceHumanProfilePreview("");
 }
 
@@ -943,6 +1075,16 @@ function applyReplaceHumanEditorSave() {
   if (replaceHumanPendingImage) image = replaceHumanPendingImage;
   else if (/^https?:\/\//i.test(url) || String(url).startsWith("data:")) image = url;
   if (!image) image = uiAvatarFallbackSrc(name);
+
+  if (replaceHumanSearchSessionExcluded.length) {
+    const prev = Array.isArray(mm.excludedLocalExperts) ? mm.excludedLocalExperts : [];
+    mm.excludedLocalExperts = [
+      ...new Set(
+        [...prev, ...replaceHumanSearchSessionExcluded].map((x) => String(x || "").trim()).filter(Boolean)
+      ),
+    ];
+  }
+  resetReplaceHumanSearchSession();
 
   mm.isHuman = true;
   mm.name = name;
@@ -2007,6 +2149,10 @@ document.getElementById("replaceHumanEditorBackdrop")?.addEventListener("click",
 document.getElementById("replaceHumanEditorClose")?.addEventListener("click", () => closeReplaceHumanEditor());
 document.getElementById("replaceHumanEditorCancel")?.addEventListener("click", () => closeReplaceHumanEditor());
 document.getElementById("replaceHumanEditorSave")?.addEventListener("click", () => applyReplaceHumanEditorSave());
+
+document.getElementById("replaceHumanSearchBtn")?.addEventListener("click", () => {
+  void runReplaceHumanLocalSearch();
+});
 
 document.getElementById("replaceHumanAvatarHit")?.addEventListener("click", () => {
   document.getElementById("rhProfileFile")?.click();
