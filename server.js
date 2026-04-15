@@ -237,7 +237,11 @@ async function getLocationFromRequest(req) {
 
 function parseJsonFromModelText(text) {
   if (!text || typeof text !== "string") return null;
-  const trimmed = text.trim();
+  let trimmed = text.trim();
+  // Models often wrap JSON in ```json ... ``` despite instructions.
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/im);
+  if (fenced) trimmed = fenced[1].trim();
+  else trimmed = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/m, "").trim();
   const start = trimmed.indexOf("{");
   const end = trimmed.lastIndexOf("}");
   if (start === -1 || end <= start) return null;
@@ -248,13 +252,41 @@ function parseJsonFromModelText(text) {
   }
 }
 
+/** Prefer SDK .text; fall back to candidates (some responses omit the accessor). */
+function extractTextFromGenaiResponse(response) {
+  if (!response) return "";
+  let t = "";
+  try {
+    t = typeof response.text === "string" ? response.text : String(response.text ?? "");
+  } catch {
+    t = "";
+  }
+  if (t && t.trim()) return t;
+  const parts = response.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return "";
+  return parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("");
+}
+
 async function geminiGenerateText(ai, userPrompt, systemInstruction) {
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: userPrompt,
     config: systemInstruction ? { systemInstruction } : undefined,
   });
-  return response?.text ?? "";
+  const text = extractTextFromGenaiResponse(response);
+  if (!text.trim()) {
+    const block = response?.promptFeedback?.blockReason;
+    const finish = response?.candidates?.[0]?.finishReason;
+    const errMsg = block
+      ? `Gemini returned no text (prompt blocked: ${block}).`
+      : finish
+        ? `Gemini returned no text (finishReason: ${finish}).`
+        : "Gemini returned no text.";
+    const err = new Error(errMsg);
+    err.rawResponse = response;
+    throw err;
+  }
+  return text;
 }
 
 app.get("/api/projects", (req, res) => {
@@ -268,6 +300,16 @@ app.get("/api/projects", (req, res) => {
         builtin: true,
       },
     ],
+  });
+});
+
+/** No Gemini call — use to verify Vercel env and routing (GET /api/creator/health). */
+app.get("/api/creator/health", (req, res) => {
+  res.json({
+    ok: true,
+    hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
+    vercel: Boolean(process.env.VERCEL),
+    node: process.version,
   });
 });
 
