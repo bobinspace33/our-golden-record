@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rubric</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .rubric-view-body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 1.25rem;
+      background: var(--bg);
+    }
+    .rubric-doc {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .rubric-doc h1 {
+      font-size: 1.1rem;
+      margin: 0 0 1rem;
+      font-weight: 600;
+    }
+    .rubric-doc img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .rubric-fallback {
+      white-space: pre-wrap;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      line-height: 1.45;
+      padding: 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+    }
+    .rubric-view-error {
+      color: var(--error);
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body class="rubric-view-body">
+  <div class="rubric-doc" id="rubricRoot">
+    <p class="rubric-view-error" id="rubricError">Loading…</p>
+  </div>
+  <script>
+    (function () {
+      const root = document.getElementById("rubricRoot");
+      const errEl = document.getElementById("rubricError");
+      try {
+        const raw = sessionStorage.getItem("aiCouncilRubricView");
+        if (!raw) {
+          errEl.textContent = "No rubric data. Close this tab and open View Rubric again from your project.";
+          return;
+        }
+        const data = JSON.parse(raw);
+        const title = (data && data.title) || "Rubric";
+        document.title = title;
+        errEl.remove();
+        const h1 = document.createElement("h1");
+        h1.textContent = title;
+        root.appendChild(h1);
+        if (data.imageBase64 && data.mimeType) {
+          const img = document.createElement("img");
+          img.src = "data:" + data.mimeType + ";base64," + data.imageBase64;
+          img.alt = "Rubric chart";
+          root.appendChild(img);
+        } else if (data.textFallback) {
+          const pre = document.createElement("pre");
+          pre.className = "rubric-fallback";
+          pre.textContent = data.textFallback;
+          root.appendChild(pre);
+        } else {
+          const p = document.createElement("p");
+          p.className = "rubric-view-error";
+          p.textContent = "Rubric payload was incomplete.";
+          root.appendChild(p);
+        }
+      } catch (e) {
+        errEl.textContent = "Could not display rubric.";
+      }
+    })();
+  </script>
+</body>
+</html>

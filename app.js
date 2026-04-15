@@ -19,6 +19,8 @@ const councilLoadingMessage = document.getElementById("councilLoadingMessage");
 const fileInput = document.getElementById("fileInput");
 const uploadBtn = document.getElementById("uploadBtn");
 const phaseMilestoneTitle = document.getElementById("phaseMilestoneTitle");
+const phaseMilestoneBannerText = document.getElementById("phaseMilestoneBannerText");
+const viewRubricCouncilBtn = document.getElementById("viewRubricCouncilBtn");
 const attachmentsList = document.getElementById("attachmentsList");
 const responsesOverlay = document.getElementById("responsesOverlay");
 const responsesOverlayBackdrop = document.getElementById("responsesOverlayBackdrop");
@@ -135,7 +137,16 @@ let sendToSelectedIds = new Set();
 let attachments = []; // { name, mimeType, data (base64) }
 
 const APP_KIND = document.body.dataset.app || "golden-record";
+
+/** Set to `true` after QC — enables View/Create Rubric on the council page (must match create-council.js). */
+const RUBRIC_CREATION_ENABLED = false;
 let customCouncilProject = null;
+
+const HUMAN_ADVISOR_SYSTEM_INSTRUCTION =
+  "Human community advisor. This slot is filled by a real-world contact in the educator's region. Encourage students to connect professionally and verify contact details before outreach.";
+
+let replaceHumanGemId = null;
+let replaceHumanPendingImage = null;
 
 function gemThumbSrc(image) {
   if (!image) return "";
@@ -200,6 +211,282 @@ function persistCustomCouncil() {
   }
 }
 
+function persistRubricsToSavedProjectInLocalStorage() {
+  const params = new URLSearchParams(window.location.search);
+  const savedId = params.get("saved");
+  if (!savedId || !customCouncilProject) return;
+  try {
+    const raw = localStorage.getItem("aiCouncilSavedProjects");
+    const list = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) return;
+    const i = list.findIndex((x) => x.id === savedId);
+    if (i === -1 || !list[i].config) return;
+    list[i].config.rubrics = customCouncilProject.rubrics;
+    list[i].config.rubricsCacheKey = customCouncilProject.rubricsCacheKey;
+    list[i].updatedAt = new Date().toISOString();
+    localStorage.setItem("aiCouncilSavedProjects", JSON.stringify(list.slice(0, 20)));
+  } catch {
+    /* ignore */
+  }
+}
+
+function persistFullProjectConfigToSaved() {
+  const params = new URLSearchParams(window.location.search);
+  const savedId = params.get("saved");
+  if (!savedId || !customCouncilProject) return;
+  try {
+    const raw = localStorage.getItem("aiCouncilSavedProjects");
+    const list = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) return;
+    const i = list.findIndex((x) => x.id === savedId);
+    if (i === -1) return;
+    list[i].config = JSON.parse(JSON.stringify(customCouncilProject));
+    list[i].updatedAt = new Date().toISOString();
+    if (customCouncilProject.projectTitle) {
+      list[i].title = customCouncilProject.projectTitle;
+    }
+    localStorage.setItem("aiCouncilSavedProjects", JSON.stringify(list.slice(0, 20)));
+  } catch {
+    /* ignore */
+  }
+}
+
+function getCouncilCurrentPhaseIndex() {
+  return Number(getProjectPhase()) - 1;
+}
+
+function getCurrentPhaseRubricRow() {
+  const idx = getCouncilCurrentPhaseIndex();
+  const rows = customCouncilProject?.rubrics;
+  if (!Array.isArray(rows)) return null;
+  return rows.find((r) => Number(r.phaseIndex) === idx) || null;
+}
+
+function hasRubricForCurrentPhase() {
+  const row = getCurrentPhaseRubricRow();
+  return !!(row && typeof row.studentTextFile === "string" && row.studentTextFile.trim().length >= 40);
+}
+
+function updateRubricCouncilButton() {
+  if (!viewRubricCouncilBtn || APP_KIND !== "custom") return;
+  if (!RUBRIC_CREATION_ENABLED) {
+    viewRubricCouncilBtn.disabled = true;
+    viewRubricCouncilBtn.setAttribute("aria-disabled", "true");
+    viewRubricCouncilBtn.classList.add("phase-view-rubric-btn--disabled");
+    viewRubricCouncilBtn.title = "Rubric tools are paused while we complete quality checks.";
+    viewRubricCouncilBtn.textContent = "Rubrics";
+    return;
+  }
+  viewRubricCouncilBtn.disabled = false;
+  viewRubricCouncilBtn.removeAttribute("aria-disabled");
+  viewRubricCouncilBtn.classList.remove("phase-view-rubric-btn--disabled");
+  viewRubricCouncilBtn.title = "";
+  viewRubricCouncilBtn.textContent = hasRubricForCurrentPhase() ? "View Rubric" : "Create Rubric";
+}
+
+let rubricEditSupportingStaging = [];
+
+function renderRubricEditSupportingList() {
+  const ul = document.getElementById("rubricEditSupportingList");
+  if (!ul) return;
+  ul.innerHTML = rubricEditSupportingStaging
+    .map(
+      (f, i) =>
+        `<li><span>${escapeHtml(f.name)}</span><button type="button" class="rubric-edit-file-remove" data-rubric-sup-idx="${i}">Remove</button></li>`
+    )
+    .join("");
+  ul.querySelectorAll("[data-rubric-sup-idx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      rubricEditSupportingStaging.splice(Number(btn.dataset.rubricSupIdx), 1);
+      renderRubricEditSupportingList();
+    });
+  });
+}
+
+function populateRubricEditOverlay() {
+  const p = customCouncilProject;
+  if (!p) return;
+  const eq = document.getElementById("rubricEditEssentialQuestion");
+  const ob = document.getElementById("rubricEditObjectives");
+  const wrap = document.getElementById("rubricEditPhases");
+  if (eq) eq.value = p.essentialQuestion || "";
+  const objs = Array.isArray(p.learningObjectives) ? p.learningObjectives : [];
+  if (ob) ob.value = objs.join("\n");
+  const phases = Array.isArray(p.phases) ? p.phases : [];
+  if (wrap) {
+    wrap.innerHTML = phases
+      .map(
+        (ph, i) => `
+      <div class="rubric-edit-phase-row">
+        <span class="rubric-edit-phase-num">${i + 1}</span>
+        <div class="rubric-edit-phase-fields">
+          <input type="text" data-rubric-phase-title="${i}" value="${escapeHtml(ph.title || "")}" placeholder="Phase title" />
+          <input type="text" data-rubric-phase-desc="${i}" value="${escapeHtml(ph.description || "")}" placeholder="Description / deliverable" />
+        </div>
+      </div>`
+      )
+      .join("");
+  }
+  rubricEditSupportingStaging = JSON.parse(
+    JSON.stringify(Array.isArray(p.supportingAttachments) ? p.supportingAttachments : [])
+  );
+  renderRubricEditSupportingList();
+}
+
+function collectRubricEditOverlayToProject() {
+  const p = customCouncilProject;
+  if (!p) return;
+  const eq = document.getElementById("rubricEditEssentialQuestion");
+  const ob = document.getElementById("rubricEditObjectives");
+  if (eq) p.essentialQuestion = eq.value?.trim() || "";
+  if (ob) {
+    const lines = (ob.value || "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    p.learningObjectives = lines.length ? lines : [];
+  }
+  const titleEls = document.querySelectorAll("#rubricEditPhases [data-rubric-phase-title]");
+  const descEls = document.querySelectorAll("#rubricEditPhases [data-rubric-phase-desc]");
+  const nextPhases = [];
+  titleEls.forEach((inp, i) => {
+    const d = descEls[i];
+    nextPhases.push({
+      title: inp?.value?.trim() || "",
+      description: d?.value?.trim() || "",
+    });
+  });
+  if (nextPhases.length) p.phases = nextPhases;
+  p.supportingAttachments = rubricEditSupportingStaging.slice();
+}
+
+function normalizeCouncilMemberPhasesAfterPhaseCountChange() {
+  const p = customCouncilProject;
+  if (!p?.members?.length) return;
+  const n = Array.isArray(p.phases) ? p.phases.length : 0;
+  p.members.forEach((m) => {
+    if (!Array.isArray(m.phasesEnabled)) m.phasesEnabled = [];
+    while (m.phasesEnabled.length < n) m.phasesEnabled.push(true);
+    if (m.phasesEnabled.length > n) m.phasesEnabled = m.phasesEnabled.slice(0, n);
+  });
+}
+
+function refreshCouncilPhaseUIAfterProjectEdit() {
+  buildPhaseSectionFromProject();
+  syncPhaseMilestoneTitle();
+  renderGems();
+  setSubmitState();
+}
+
+function openRubricPreconfirmOverlay() {
+  const el = document.getElementById("rubricPreconfirmOverlay");
+  if (el) el.hidden = false;
+}
+
+function closeRubricPreconfirmOverlay() {
+  const el = document.getElementById("rubricPreconfirmOverlay");
+  if (el) el.hidden = true;
+}
+
+function openRubricEditOverlay() {
+  const el = document.getElementById("rubricEditOverlay");
+  if (el) el.hidden = false;
+}
+
+function closeRubricEditOverlay() {
+  const el = document.getElementById("rubricEditOverlay");
+  if (el) el.hidden = true;
+}
+
+async function openRubricChartInNewTabForRow(row) {
+  if (!row?.studentTextFile) {
+    throw new Error("No rubric content for this phase.");
+  }
+  const res = await fetch("/api/creator/rubric-chart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      studentTextFile: row.studentTextFile,
+      projectTitle: customCouncilProject.projectTitle || "Project",
+      phaseTitle: row.phaseTitle,
+      isFinal: row.isFinal,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Could not generate rubric chart.");
+  const payload = {
+    title: `${customCouncilProject.projectTitle || "Project"} — ${row.phaseTitle}${row.isFinal ? " (Final product)" : ""}`,
+    mimeType: data.mimeType || "image/png",
+    imageBase64: data.imageBase64,
+    textFallback: row.studentTextFile,
+  };
+  sessionStorage.setItem("aiCouncilRubricView", JSON.stringify(payload));
+  window.open("/rubric-view.html", "_blank");
+}
+
+async function createRubricAndOpenForCurrentPhase() {
+  delete customCouncilProject.rubrics;
+  delete customCouncilProject.rubricsCacheKey;
+  const rubrics = await ensureCouncilRubricsLoaded();
+  const idx = getCouncilCurrentPhaseIndex();
+  const row = rubrics.find((r) => Number(r.phaseIndex) === idx);
+  if (!row) throw new Error("No rubric for this phase.");
+  await openRubricChartInNewTabForRow(row);
+  persistRubricsToSavedProjectInLocalStorage();
+  updateRubricCouncilButton();
+}
+
+function councilRubricsCacheKey() {
+  const p = customCouncilProject;
+  if (!p) return "";
+  const title = String(p.projectTitle || "").trim();
+  const obj = (Array.isArray(p.learningObjectives) ? p.learningObjectives : [])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    .join("|");
+  const ph = (Array.isArray(p.phases) ? p.phases : [])
+    .map((x) => `${String(x?.title || "").trim()}\t${String(x?.description || "").trim()}`)
+    .join(";;");
+  return [title, obj, ph].join(":::");
+}
+
+async function ensureCouncilRubricsLoaded() {
+  const phases = customCouncilProject?.phases;
+  if (!Array.isArray(phases) || !phases.length) {
+    throw new Error("No phases on this project.");
+  }
+  const cacheKey = councilRubricsCacheKey();
+  if (
+    Array.isArray(customCouncilProject.rubrics) &&
+    customCouncilProject.rubrics.length === phases.length &&
+    customCouncilProject.rubricsCacheKey === cacheKey
+  ) {
+    return customCouncilProject.rubrics;
+  }
+  const res = await fetch("/api/creator/rubric-specs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectTitle: customCouncilProject.projectTitle || "",
+      projectSummary: customCouncilProject.projectSummary || "",
+      essentialQuestion: customCouncilProject.essentialQuestion || "",
+      objectives: customCouncilProject.learningObjectives || [],
+      learningObjectives: customCouncilProject.learningObjectives || [],
+      phases,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Could not build rubrics.");
+  if (!Array.isArray(data.rubrics) || !data.rubrics.length) {
+    throw new Error("No rubrics returned from the server.");
+  }
+  customCouncilProject.rubrics = data.rubrics;
+  customCouncilProject.rubricsCacheKey = cacheKey;
+  persistCustomCouncil();
+  persistRubricsToSavedProjectInLocalStorage();
+  return customCouncilProject.rubrics;
+}
+
 function loadSavedProjectIntoSession(savedId) {
   if (!savedId) return;
   try {
@@ -236,6 +523,7 @@ function buildPhaseSectionFromProject() {
     briefLink.rel = "noopener noreferrer";
     briefLink.hidden = false;
   }
+  updateRubricCouncilButton();
 }
 
 // Phase 1: Jane only. 2: Jane, Carl, Henrietta. 3: + Wolfgang. 4: all.
@@ -275,15 +563,24 @@ const PHASE_MILESTONE_LABELS = {
 };
 
 function syncPhaseMilestoneTitle() {
-  if (!phaseMilestoneTitle) return;
+  if (!phaseMilestoneTitle && !phaseMilestoneBannerText) return;
   const phase = getProjectPhase();
+  let text = "";
   if (APP_KIND === "custom" && customCouncilProject && Array.isArray(customCouncilProject.phases)) {
     const idx = Number(phase) - 1;
     const p = customCouncilProject.phases[idx];
-    phaseMilestoneTitle.textContent = p ? p.title || `Phase ${phase}` : "—";
-    return;
+    if (p) {
+      const desc = String(p.description || "").trim();
+      const tit = String(p.title || "").trim();
+      text = desc || tit || "—";
+    } else {
+      text = "—";
+    }
+  } else {
+    text = PHASE_MILESTONE_LABELS[phase] || PHASE_MILESTONE_LABELS[1];
   }
-  phaseMilestoneTitle.textContent = PHASE_MILESTONE_LABELS[phase] || PHASE_MILESTONE_LABELS[1];
+  if (phaseMilestoneTitle) phaseMilestoneTitle.textContent = text;
+  if (phaseMilestoneBannerText) phaseMilestoneBannerText.textContent = text;
 }
 
 function setStatus(message, type = "") {
@@ -320,6 +617,11 @@ function renderGems() {
     const imgHtml = imgSrc
       ? `<img class="gem-card-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="${pollinationsThumb ? "eager" : "lazy"}" />`
       : "";
+    const replaceHumanBtnSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+    const replaceHumanBtnHtml =
+      enabled && APP_KIND === "custom"
+        ? `<button type="button" class="gem-replace-human-hit" data-replace-human-gem="${gem.id}" title="Replace with human council member" aria-label="Replace with human council member">${replaceHumanBtnSvg}</button>`
+        : "";
 
     if (isHuman) {
       const m = getCustomMember(gem.id);
@@ -397,11 +699,18 @@ function renderGems() {
     card.tabIndex = enabled ? 0 : -1;
     card.innerHTML = `
       ${imgHtml}
+      ${replaceHumanBtnHtml}
       <span class="gem-name">${escapeHtml(gem.name)}</span>
       <span class="gem-job-title">${escapeHtml(gem.jobTitle || "")}</span>
     `;
+    card.querySelector(".gem-replace-human-hit")?.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      openReplaceHumanPreconfirm(gem.id);
+    });
     if (enabled) {
-      card.addEventListener("click", () => {
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".gem-replace-human-hit")) return;
         if (selectedIds.has(gem.id)) {
           selectedIds.delete(gem.id);
         } else {
@@ -492,9 +801,12 @@ function responseToHtml(text) {
   return out || escapeHtml(text);
 }
 
-const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf"];
+const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf", "text/html"];
 function isAllowedFile(file) {
-  return ALLOWED_MIME_PREFIXES.some((p) => file.type && file.type.startsWith(p)) || /\.(pdf|txt|md)$/i.test(file.name);
+  return (
+    ALLOWED_MIME_PREFIXES.some((p) => file.type && file.type.startsWith(p)) ||
+    /\.(pdf|txt|md|html?)$/i.test(file.name)
+  );
 }
 
 function renderAttachments() {
@@ -530,6 +842,224 @@ function readFileAsBase64(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function updateReplaceHumanProfilePreview(src) {
+  const img = document.getElementById("rhProfilePreview");
+  const ph = document.getElementById("rhProfilePlaceholder");
+  if (!img || !ph) return;
+  const s = String(src || "").trim();
+  if (s) {
+    img.src = s;
+    img.hidden = false;
+    ph.hidden = true;
+  } else {
+    img.removeAttribute("src");
+    img.hidden = true;
+    ph.hidden = false;
+  }
+}
+
+function openReplaceHumanPreconfirm(gemId) {
+  replaceHumanGemId = gemId;
+  const el = document.getElementById("replaceHumanPreconfirmOverlay");
+  if (el) el.hidden = false;
+}
+
+function closeReplaceHumanPreconfirm() {
+  const el = document.getElementById("replaceHumanPreconfirmOverlay");
+  if (el) el.hidden = true;
+}
+
+function dismissReplaceHumanPreconfirm() {
+  closeReplaceHumanPreconfirm();
+  replaceHumanGemId = null;
+}
+
+function populateReplaceHumanEditorFromGem() {
+  const gid = replaceHumanGemId;
+  const gem = gems.find((g) => Number(g.id) === Number(gid));
+  const mm = getCustomMember(gid);
+  replaceHumanPendingImage = null;
+  const nameEl = document.getElementById("rhName");
+  const titleEl = document.getElementById("rhTitle");
+  const orgEl = document.getElementById("rhOrganization");
+  const emailEl = document.getElementById("rhEmail");
+  const phoneEl = document.getElementById("rhPhone");
+  const webEl = document.getElementById("rhWebsite");
+  const urlEl = document.getElementById("rhProfileUrl");
+  if (nameEl) nameEl.value = gem?.name || mm?.name || "";
+  if (titleEl) titleEl.value = gem?.jobTitle || mm?.jobTitle || "";
+  if (orgEl) orgEl.value = "";
+  if (emailEl) emailEl.value = "";
+  if (phoneEl) phoneEl.value = "";
+  if (webEl) webEl.value = "";
+  if (urlEl) urlEl.value = "";
+  updateReplaceHumanProfilePreview("");
+}
+
+function openReplaceHumanEditor() {
+  populateReplaceHumanEditorFromGem();
+  const el = document.getElementById("replaceHumanEditorOverlay");
+  if (el) el.hidden = false;
+}
+
+function closeReplaceHumanEditor() {
+  const el = document.getElementById("replaceHumanEditorOverlay");
+  if (el) el.hidden = true;
+  replaceHumanGemId = null;
+  replaceHumanPendingImage = null;
+  updateReplaceHumanProfilePreview("");
+}
+
+function applyReplaceHumanEditorSave() {
+  const gid = replaceHumanGemId;
+  const mm = getCustomMember(gid);
+  if (!mm) {
+    closeReplaceHumanEditor();
+    return;
+  }
+  const name = document.getElementById("rhName")?.value?.trim() || "";
+  if (!name) {
+    setStatus("Enter a name for the human council member.", "error");
+    return;
+  }
+  const title = document.getElementById("rhTitle")?.value?.trim() || "";
+  const organization = document.getElementById("rhOrganization")?.value?.trim() || "";
+  const email = document.getElementById("rhEmail")?.value?.trim() || "";
+  const phone = document.getElementById("rhPhone")?.value?.trim() || "";
+  const website = document.getElementById("rhWebsite")?.value?.trim() || "";
+  const url = document.getElementById("rhProfileUrl")?.value?.trim() || "";
+  let image = "";
+  if (replaceHumanPendingImage) image = replaceHumanPendingImage;
+  else if (/^https?:\/\//i.test(url) || String(url).startsWith("data:")) image = url;
+  if (!image) image = uiAvatarFallbackSrc(name);
+
+  mm.isHuman = true;
+  mm.name = name;
+  mm.jobTitle = title;
+  mm.portraitGender = null;
+  mm.localExpert = null;
+  mm.excludedLocalExperts = Array.isArray(mm.excludedLocalExperts) ? mm.excludedLocalExperts : [];
+  mm.image = image;
+  mm.systemInstruction = HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
+  mm.humanContact = {
+    name,
+    title,
+    organization,
+    phone,
+    email,
+    website,
+  };
+  const g = gems.find((x) => Number(x.id) === Number(gid));
+  if (g) {
+    g.isHuman = true;
+    g.name = name;
+    g.jobTitle = title;
+    g.image = image;
+  }
+  persistCustomCouncil();
+  persistFullProjectConfigToSaved();
+  closeReplaceHumanEditor();
+  renderGems();
+  setSubmitState();
+  setStatus("This seat is now a human council member.", "success");
+}
+
+const COUNCIL_STOCK_PORTRAIT_MALE = [
+  "/portraits/male01.png",
+  "/portraits/male02.png",
+  "/portraits/male03.png",
+  "/portraits/male04.png",
+  "/portraits/male05.png",
+  "/portraits/male06.png",
+  "/portraits/male07.png",
+  "/portraits/male08.png",
+];
+const COUNCIL_STOCK_PORTRAIT_FEMALE = [
+  "/portraits/female01.png",
+  "/portraits/female02.png",
+  "/portraits/female03.png",
+  "/portraits/female04.png",
+  "/portraits/female05.png",
+  "/portraits/female06.png",
+  "/portraits/female07.png",
+  "/portraits/female08.png",
+];
+
+function shuffleCouncilPortraitPool(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function councilMemberPortraitGender(m) {
+  const pg = String(m.portraitGender || "").toLowerCase();
+  if (pg === "male" || pg === "female" || pg === "neutral") return pg;
+  return "neutral";
+}
+
+function councilPortraitNeedsMigration(image) {
+  const s = String(image || "").trim();
+  if (!s) return true;
+  if (s.startsWith("/portraits/")) return false;
+  if (/pollinations\.ai/i.test(s)) return true;
+  if (/dicebear\.com/i.test(s)) return true;
+  return false;
+}
+
+function assignStockPortraitsToCouncilMembersList(members) {
+  if (!Array.isArray(members)) return;
+  const male = COUNCIL_STOCK_PORTRAIT_MALE;
+  const female = COUNCIL_STOCK_PORTRAIT_FEMALE;
+  const pickFirst = (paths, usedSet) => {
+    for (const p of shuffleCouncilPortraitPool(paths)) {
+      if (!usedSet.has(p)) return p;
+    }
+    return null;
+  };
+  const pickUnused = (gender, usedSet) => {
+    if (gender === "male") {
+      return pickFirst(male, usedSet) || pickFirst(female, usedSet) || pickFirst([...male, ...female], usedSet);
+    }
+    if (gender === "female") {
+      return pickFirst(female, usedSet) || pickFirst(male, usedSet) || pickFirst([...male, ...female], usedSet);
+    }
+    return (
+      pickFirst(shuffleCouncilPortraitPool([...male, ...female]), usedSet) ||
+      pickFirst(male, usedSet) ||
+      pickFirst(female, usedSet)
+    );
+  };
+  const used = new Set();
+  const indices = shuffleCouncilPortraitPool(members.map((_, i) => i).filter((i) => !members[i].isHuman));
+  for (const i of indices) {
+    const m = members[i];
+    const g = councilMemberPortraitGender(m);
+    const path = pickUnused(g, used);
+    if (path) used.add(path);
+    m.image = path || uiAvatarFallbackSrc(m.name || `member${i}`);
+  }
+}
+
+function maybeMigrateCouncilPortraits() {
+  const members = customCouncilProject?.members;
+  if (!Array.isArray(members)) return;
+  if (!members.some((m) => !m.isHuman && councilPortraitNeedsMigration(m.image))) return;
+  assignStockPortraitsToCouncilMembersList(members);
+  persistCustomCouncil();
 }
 
 function tokenizeLineForFormatting(line) {
@@ -1331,6 +1861,7 @@ async function loadGems() {
       window.location.href = "/";
       return;
     }
+    maybeMigrateCouncilPortraits();
     const titleEl = document.getElementById("councilPageTitle");
     if (titleEl) titleEl.textContent = customCouncilProject.projectTitle || "Your AI Council";
     buildPhaseSectionFromProject();
@@ -1345,6 +1876,7 @@ async function loadGems() {
     renderGems();
     syncPhaseMilestoneTitle();
     setSubmitState();
+    if (viewRubricCouncilBtn) viewRubricCouncilBtn.hidden = false;
     return;
   }
 
@@ -1375,6 +1907,7 @@ function onPhaseChange() {
   syncPhaseMilestoneTitle();
   renderGems();
   setSubmitState();
+  updateRubricCouncilButton();
 }
 
 document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
@@ -1382,6 +1915,151 @@ document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
 });
 
 uploadBtn.addEventListener("click", () => fileInput.click());
+
+viewRubricCouncilBtn?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!RUBRIC_CREATION_ENABLED) return;
+  if (APP_KIND !== "custom" || !customCouncilProject) return;
+  try {
+    if (hasRubricForCurrentPhase()) {
+      await openRubricChartInNewTabForRow(getCurrentPhaseRubricRow());
+      return;
+    }
+    openRubricPreconfirmOverlay();
+  } catch (err) {
+    setStatus(err.message || String(err), "error");
+  }
+});
+
+document.getElementById("rubricPreconfirmBackdrop")?.addEventListener("click", () => closeRubricPreconfirmOverlay());
+document.getElementById("rubricPreconfirmNo")?.addEventListener("click", async () => {
+  closeRubricPreconfirmOverlay();
+  try {
+    await createRubricAndOpenForCurrentPhase();
+  } catch (err) {
+    setStatus(err.message || String(err), "error");
+  }
+});
+document.getElementById("rubricPreconfirmYes")?.addEventListener("click", () => {
+  closeRubricPreconfirmOverlay();
+  populateRubricEditOverlay();
+  openRubricEditOverlay();
+});
+
+document.getElementById("rubricEditBackdrop")?.addEventListener("click", () => closeRubricEditOverlay());
+document.getElementById("rubricEditClose")?.addEventListener("click", () => closeRubricEditOverlay());
+document.getElementById("rubricEditSaveProject")?.addEventListener("click", () => {
+  collectRubricEditOverlayToProject();
+  normalizeCouncilMemberPhasesAfterPhaseCountChange();
+  persistCustomCouncil();
+  persistFullProjectConfigToSaved();
+  closeRubricEditOverlay();
+  refreshCouncilPhaseUIAfterProjectEdit();
+  setStatus("Project details saved.", "success");
+});
+
+document.getElementById("rubricEditCreateRubric")?.addEventListener("click", async () => {
+  collectRubricEditOverlayToProject();
+  normalizeCouncilMemberPhasesAfterPhaseCountChange();
+  persistCustomCouncil();
+  persistFullProjectConfigToSaved();
+  closeRubricEditOverlay();
+  refreshCouncilPhaseUIAfterProjectEdit();
+  try {
+    await createRubricAndOpenForCurrentPhase();
+    setStatus("Rubric created. Opened in a new tab.", "success");
+  } catch (err) {
+    setStatus(err.message || String(err), "error");
+  }
+});
+
+document.getElementById("rubricEditSupportingFiles")?.addEventListener("change", async (e) => {
+  const inp = e.target;
+  const files = Array.from(inp.files || []);
+  inp.value = "";
+  for (const file of files) {
+    if (!isAllowedFile(file)) continue;
+    try {
+      const payload = await readFileAsBase64(file);
+      if (payload?.data) {
+        rubricEditSupportingStaging.push({
+          name: payload.name || file.name,
+          mimeType: payload.mimeType || file.type || "application/octet-stream",
+          data: payload.data,
+        });
+      }
+    } catch {
+      setStatus("Could not read file: " + file.name, "error");
+    }
+  }
+  renderRubricEditSupportingList();
+});
+
+document.getElementById("replaceHumanPreconfirmBackdrop")?.addEventListener("click", () => dismissReplaceHumanPreconfirm());
+document.getElementById("replaceHumanPreconfirmNo")?.addEventListener("click", () => dismissReplaceHumanPreconfirm());
+document.getElementById("replaceHumanPreconfirmYes")?.addEventListener("click", () => {
+  closeReplaceHumanPreconfirm();
+  openReplaceHumanEditor();
+});
+
+document.getElementById("replaceHumanEditorBackdrop")?.addEventListener("click", () => closeReplaceHumanEditor());
+document.getElementById("replaceHumanEditorClose")?.addEventListener("click", () => closeReplaceHumanEditor());
+document.getElementById("replaceHumanEditorCancel")?.addEventListener("click", () => closeReplaceHumanEditor());
+document.getElementById("replaceHumanEditorSave")?.addEventListener("click", () => applyReplaceHumanEditorSave());
+
+document.getElementById("replaceHumanAvatarHit")?.addEventListener("click", () => {
+  document.getElementById("rhProfileFile")?.click();
+});
+
+document.getElementById("rhProfileFile")?.addEventListener("change", async (e) => {
+  const inp = e.target;
+  const file = (inp.files || [])[0];
+  inp.value = "";
+  if (!file || !String(file.type || "").startsWith("image/")) return;
+  try {
+    replaceHumanPendingImage = await readFileAsDataUrl(file);
+    const urlEl = document.getElementById("rhProfileUrl");
+    if (urlEl) urlEl.value = "";
+    updateReplaceHumanProfilePreview(replaceHumanPendingImage);
+  } catch {
+    setStatus("Could not read that image file.", "error");
+  }
+});
+
+document.getElementById("rhProfileUrl")?.addEventListener("input", () => {
+  replaceHumanPendingImage = null;
+  const u = document.getElementById("rhProfileUrl")?.value?.trim() || "";
+  if (/^https?:\/\//i.test(u) || u.startsWith("data:")) updateReplaceHumanProfilePreview(u);
+  else updateReplaceHumanProfilePreview("");
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const rhEd = document.getElementById("replaceHumanEditorOverlay");
+  const rhPre = document.getElementById("replaceHumanPreconfirmOverlay");
+  const pre = document.getElementById("rubricPreconfirmOverlay");
+  const ed = document.getElementById("rubricEditOverlay");
+  if (rhEd && !rhEd.hidden) {
+    closeReplaceHumanEditor();
+    e.preventDefault();
+    return;
+  }
+  if (rhPre && !rhPre.hidden) {
+    dismissReplaceHumanPreconfirm();
+    e.preventDefault();
+    return;
+  }
+  if (ed && !ed.hidden) {
+    closeRubricEditOverlay();
+    e.preventDefault();
+    return;
+  }
+  if (pre && !pre.hidden) {
+    closeRubricPreconfirmOverlay();
+    e.preventDefault();
+  }
+});
 fileInput.addEventListener("change", async () => {
   const files = Array.from(fileInput.files || []).filter(isAllowedFile);
   fileInput.value = "";

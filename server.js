@@ -64,6 +64,9 @@ app.get("/api/debug", (req, res) => {
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 const PORT = process.env.PORT || 3000;
 
+/** Gemini native image ("Nano Banana") — see https://ai.google.dev/gemini-api/docs/image-generation */
+const GEMINI_IMAGE_MODEL = (process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image").trim();
+
 /** Comma-separated Gemini model ids for creator JSON routes; next model is used on 429 / quota errors. */
 const GEMINI_CREATOR_MODEL_CHAIN = (
   process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite"
@@ -71,6 +74,63 @@ const GEMINI_CREATOR_MODEL_CHAIN = (
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+
+/**
+ * Comma-separated model ids for /api/chat and /api/chat/custom (council messages).
+ * Defaults to creator chain. First candidate is each member's configured model, then these (deduped).
+ * Example: GEMINI_CHAT_MODEL_CHAIN=gemini-2.0-flash,gemini-2.5-flash-lite
+ */
+const GEMINI_CHAT_MODEL_CHAIN = String(
+  process.env.GEMINI_CHAT_MODEL_CHAIN || process.env.GEMINI_CREATOR_MODEL_CHAIN || "gemini-2.5-flash,gemini-2.5-flash-lite"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function chatModelCandidates(primaryModel) {
+  const p = (primaryModel || "gemini-2.5-flash").trim();
+  const out = [];
+  const seen = new Set();
+  for (const m of [p, ...GEMINI_CHAT_MODEL_CHAIN]) {
+    if (m && !seen.has(m)) {
+      seen.add(m);
+      out.push(m);
+    }
+  }
+  return out.length ? out : ["gemini-2.5-flash"];
+}
+
+/**
+ * Tries each model in order when Google returns overload / quota style errors.
+ * @param {import('@google/genai').GoogleGenAI} ai
+ */
+async function geminiGenerateContentWithModelFallback(ai, modelCandidates, generateArgs) {
+  const tried = [];
+  let lastErr = null;
+  for (let i = 0; i < modelCandidates.length; i++) {
+    const model = modelCandidates[i];
+    tried.push(model);
+    try {
+      return await ai.models.generateContent({
+        model,
+        ...generateArgs,
+      });
+    } catch (e) {
+      lastErr = e;
+      const canTryNext = i < modelCandidates.length - 1 && isRetriableGeminiQuotaError(e);
+      if (canTryNext) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      const wrapped = new Error(
+        `${e?.message || String(e)}${tried.length > 1 ? ` (tried models: ${tried.join(", ")})` : ""}`
+      );
+      wrapped.cause = e;
+      throw wrapped;
+    }
+  }
+  throw lastErr || new Error(`Gemini request failed (tried: ${tried.join(", ")})`);
+}
 
 // Folder where Gem documents live. Put your PDFs, TXT, etc. here and reference them in GEMS[].documents.
 const DOCUMENTS_DIR = path.join(process.cwd(), "documents");
@@ -261,6 +321,20 @@ function parseJsonFromModelText(text) {
 }
 
 /** Prefer SDK .text; fall back to candidates (some responses omit the accessor). */
+/** Coerce model phasesEnabled to length n; default true when missing; ensure ≥1 true. */
+function normalizePhasesEnabledArray(arr, n) {
+  const len = Math.max(0, Math.floor(Number(n)) || 0);
+  if (!len) return [];
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    let v = Array.isArray(arr) && i < arr.length ? arr[i] : true;
+    if (typeof v === "string") v = /^true|^yes|^1|^on/i.test(String(v).trim());
+    out.push(Boolean(v));
+  }
+  if (!out.some(Boolean)) out[0] = true;
+  return out;
+}
+
 function extractTextFromGenaiResponse(response) {
   if (!response) return "";
   let t = "";
@@ -275,6 +349,62 @@ function extractTextFromGenaiResponse(response) {
   return parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("");
 }
 
+/** First inline image part from a Nano Banana / image-capable generateContent response. */
+function extractImageFromGenaiResponse(response) {
+  const parts = response?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return null;
+  for (const p of parts) {
+    const id = p?.inlineData || p?.inline_data;
+    if (!id?.data) continue;
+    const mimeType = id.mimeType || id.mime_type || "image/png";
+    const data = id.data;
+    const b64 = typeof data === "string" ? data : Buffer.from(data).toString("base64");
+    return { mimeType, data: b64 };
+  }
+  return null;
+}
+
+/** Names of PBLworks-style rubric families represented by PDFs in public/rubrics (for prompt context). */
+function listPblRubricAnchorFamilies() {
+  const dir = path.join(PUBLIC_DIR, "rubrics");
+  if (!fs.existsSync(dir)) {
+    return ["Collaboration", "Critical Thinking", "Creativity", "Complex Communication", "Self-Directed Learning"];
+  }
+  const names = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (name.startsWith(".") || name === ".DS_Store") continue;
+    const sub = path.join(dir, name);
+    if (!fs.statSync(sub).isDirectory()) continue;
+    const cleaned = name.replace(/_Final Rubrics?\s*$/i, "").replace(/_/g, " ").trim();
+    if (cleaned) names.push(cleaned);
+  }
+  return names.length ? names : ["Collaboration", "Critical Thinking", "Creativity", "Complex Communication", "Self-Directed Learning"];
+}
+
+async function geminiGenerateRubricChartImage(ai, imagePrompt) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: GEMINI_IMAGE_MODEL,
+        contents: imagePrompt,
+        config: { responseModalities: ["TEXT", "IMAGE"] },
+      });
+      const img = extractImageFromGenaiResponse(response);
+      if (img?.data) return img;
+      lastErr = new Error("Image model returned no image data.");
+    } catch (e) {
+      lastErr = e;
+      if (attempt === 0 && isRetriableGeminiQuotaError(e)) {
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr || new Error("Image generation failed.");
+}
+
 /** True when another model (or retry) might succeed — not for auth or bad requests. */
 function isRetriableGeminiQuotaError(err) {
   if (!err) return false;
@@ -282,15 +412,26 @@ function isRetriableGeminiQuotaError(err) {
   const code = err.code ?? err.status ?? err.statusCode ?? err?.error?.code ?? err?.cause?.code;
   const status = err.status ?? err.statusCode ?? err?.error?.status;
   if (code === 429 || status === 429) return true;
+  if (code === 503 || status === 503) return true;
   if (String(code) === "8") return true; // gRPC RESOURCE_EXHAUSTED
+  if (String(code) === "14") return true; // gRPC UNAVAILABLE (overload / high demand)
   if (String(code).toUpperCase() === "RESOURCE_EXHAUSTED") return true;
+  if (String(code).toUpperCase() === "UNAVAILABLE") return true;
   if (msg.includes("resource_exhausted")) return true;
+  if (msg.includes("unavailable")) return true;
   if (msg.includes("429")) return true;
+  if (msg.includes("503")) return true;
   if (msg.includes("quota")) return true;
   if (msg.includes("rate limit")) return true;
   if (msg.includes("too many requests")) return true;
   if (msg.includes("exceeded your")) return true;
   if (msg.includes("capacity")) return true;
+  if (msg.includes("high demand")) return true;
+  if (msg.includes("overloaded")) return true;
+  if (msg.includes("overload")) return true;
+  if (msg.includes("try again")) return true;
+  if (msg.includes("busy")) return true;
+  if (msg.includes("throttl")) return true;
   return false;
 }
 
@@ -358,6 +499,7 @@ app.get("/api/creator/health", (req, res) => {
     ok: true,
     hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
     creatorModelChain: GEMINI_CREATOR_MODEL_CHAIN,
+    chatModelChain: GEMINI_CHAT_MODEL_CHAIN,
     vercel: Boolean(process.env.VERCEL),
     node: process.version,
   });
@@ -404,9 +546,21 @@ app.post("/api/creator/suggest-members", async (req, res) => {
   } = req.body || {};
   const count = Math.min(6, Math.max(2, Number(memberCount) || 4));
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const phaseStr = Array.isArray(phases)
-    ? phases.map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`).join("\n")
-    : "";
+  const phaseLinesArray = Array.isArray(phases) ? phases : [];
+  const phaseCount = phaseLinesArray.length;
+  const phaseStr = phaseLinesArray
+    .map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`)
+    .join("\n");
+  const phaseCountNote =
+    phaseCount > 0
+      ? `
+
+Phase-to-role alignment (required):
+- The project has exactly **${phaseCount}** phase slots in order (lines below). For **each** member you MUST include "phasesEnabled": an array of exactly **${phaseCount}** booleans in the same order (index 0 = phase 1, etc.).
+- Use **true** for phases where this advisor's expertise would **meaningfully** help students with that phase's work; use **false** where that phase is mostly outside their lane (students are unlikely to need that lens then). Members may still be toggled on later in the UI—optimize for typical need.
+- **Every member must have at least one true** in phasesEnabled. If a phase line is blank or vague, prefer **true** so students retain access.`
+      : "";
+
   const prompt = `Design exactly ${count} distinct stakeholder roles for a student project-based learning (PBL) "AI council" — adults/experts who advise students. Every role must be fully specified: no placeholders, no "TBD", no "Pending".
 
 Project title: ${projectTitle}
@@ -414,7 +568,8 @@ Essential question (if any): ${essentialQuestion || "(not specified)"}
 Context: ${projectSummary}
 Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
 Phases:
-${phaseStr}
+${phaseStr || "(no phases listed yet—use phasesEnabled all true for every member)"}
+${phaseCountNote}
 
 Requirements for ALL ${count} members:
 - Each needs a specific, memorable first name (or first + last) and a clear job title. **No two members may cover the same primary angle**—spread expertise across distinct domains (e.g. only one "science" lens, one community/cultural lens, one literacy/communication lens, one ethics or civics lens, one design or technical lens, etc.). If the project needs overlap, differentiate sharply in audience or method (e.g. field biologist vs data analyst).
@@ -422,7 +577,9 @@ Requirements for ALL ${count} members:
 - Roles must complement each other (collectively cover the project) and align with the phases and objectives above.
 
 Reply with ONLY valid JSON. The "members" array MUST contain exactly ${count} objects:
-{"members":[{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"}, ...]}
+{"members":[{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"${phaseCount > 0 ? `,"phasesEnabled":[${Array(phaseCount).fill("true").join(",")}]` : ""}}, ...]}
+
+Replace phasesEnabled with your chosen true/false pattern (${phaseCount} entries per member).${phaseCount === 0 ? " If there are zero phases, omit phasesEnabled or use []." : ""}
 
 For each member, portraitGender MUST reflect how the given name is most often read in English-speaking classrooms: "female" or "male" when the first/given name strongly suggests it, otherwise "neutral" (ambiguous names, initials-only, surnames-only, or honorific-only).`;
   try {
@@ -439,6 +596,7 @@ For each member, portraitGender MUST reflect how the given name is most often re
         jobTitle: row.jobTitle || "",
         systemInstruction: row.systemInstruction || "",
         portraitGender: portraitOk.has(pg) ? pg : null,
+        phasesEnabled: normalizePhasesEnabledArray(row.phasesEnabled, phaseCount),
       };
     });
     while (members.length < count) {
@@ -447,6 +605,7 @@ For each member, portraitGender MUST reflect how the given name is most often re
         jobTitle: "Pending",
         systemInstruction: "Click the refresh button on this card to generate this role, or run Generate roles from template again.",
         portraitGender: null,
+        phasesEnabled: normalizePhasesEnabledArray(null, phaseCount),
       });
     }
     res.json({ members });
@@ -470,9 +629,11 @@ app.post("/api/creator/regenerate-member", async (req, res) => {
   } = req.body || {};
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const avoid = Array.isArray(existingNames) ? existingNames.filter(Boolean).join(", ") : "";
-  const phaseStr = Array.isArray(phases)
-    ? phases.map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`).join("\n")
-    : "";
+  const phaseLinesArray = Array.isArray(phases) ? phases : [];
+  const phaseCount = phaseLinesArray.length;
+  const phaseStr = phaseLinesArray
+    .map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`)
+    .join("\n");
   const siblingBlock =
     Array.isArray(otherMembers) && otherMembers.length > 0
       ? otherMembers
@@ -503,7 +664,9 @@ Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
 Phases: ${phaseStr}
 
 Reply with ONLY valid JSON:
-{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"}
+{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"${phaseCount > 0 ? `,"phasesEnabled":[${Array(phaseCount).fill("true").join(",")}]` : ""}}
+
+Include "phasesEnabled" only when ${phaseCount} > 0: exactly ${phaseCount} booleans in phase order (true where this new role helps students in that phase, false where not needed). At least one true.
 
 portraitGender must match how the given name is most often read (female / male / neutral for ambiguous cases).`;
   try {
@@ -519,7 +682,73 @@ portraitGender must match how the given name is most often read (female / male /
       jobTitle: parsed.jobTitle,
       systemInstruction: parsed.systemInstruction || "",
       portraitGender: portraitOk.has(pg) ? pg : null,
+      phasesEnabled: normalizePhasesEnabledArray(parsed.phasesEnabled, phaseCount),
     });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/align-member-phases", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const {
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    objectives = [],
+    phases = [],
+    members = [],
+  } = req.body || {};
+  const phaseLinesArray = Array.isArray(phases) ? phases : [];
+  const phaseCount = phaseLinesArray.length;
+  if (!phaseCount) {
+    return res.status(400).json({ error: "At least one project phase is required." });
+  }
+  const mem = Array.isArray(members) ? members : [];
+  if (!mem.length) {
+    return res.status(400).json({ error: "At least one council member is required." });
+  }
+  const phaseStr = phaseLinesArray
+    .map((p, i) => `${i + 1}. ${p.title || ""}: ${p.description || ""}`)
+    .join("\n");
+  const memberBlock = mem
+    .map((m, i) => {
+      const nm = typeof m?.name === "string" ? m.name.trim() : "";
+      const jt = typeof m?.jobTitle === "string" ? m.jobTitle.trim() : "";
+      const si = typeof m?.systemInstruction === "string" ? m.systemInstruction.trim() : "";
+      return `${i + 1}. ${nm || "Member"} — ${jt || "Advisor"}\n   Coaching focus: ${si.slice(0, 380)}${si.length > 380 ? "…" : ""}`;
+    })
+    .join("\n\n");
+
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const prompt = `You align an existing PBL "AI council" with project phases. For each advisor, decide which phases they should be **actively available** for (checkboxes in the UI).
+
+Project title: ${projectTitle}
+Essential question: ${essentialQuestion || "(not specified)"}
+Context: ${projectSummary}
+Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+
+Phases (in order, exactly ${phaseCount}):
+${phaseStr}
+
+Council members (same order as below; member 1 = first array, etc.):
+${memberBlock}
+
+Reply with ONLY valid JSON:
+{"availability":[[${Array(phaseCount).fill("true").join(",")}], ...]}
+
+"availability" MUST be an array of exactly ${mem.length} arrays. Each inner array MUST have exactly ${phaseCount} booleans: true = this advisor is likely needed during that phase; false = that phase is outside their usual lane (students may still enable them manually). **Each inner array must have at least one true.**`;
+
+  try {
+    const text = await geminiGenerateText(ai, prompt);
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed?.availability || !Array.isArray(parsed.availability)) {
+      return res.status(422).json({ error: "Could not parse availability.", raw: text.slice(0, 500) });
+    }
+    const availability = mem.map((_, i) => normalizePhasesEnabledArray(parsed.availability[i], phaseCount));
+    res.json({ availability });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -645,8 +874,8 @@ Reply with ONLY valid JSON:
   try {
     const filePart = createPartFromBase64(data, mimeType);
     const contents = createUserContent([filePart, userPrompt]);
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+    const models = chatModelCandidates("gemini-2.5-flash");
+    const response = await geminiGenerateContentWithModelFallback(ai, models, {
       contents,
       config: { systemInstruction },
     });
@@ -677,6 +906,156 @@ Reply with ONLY valid JSON:
     }
 
     res.json({ title, essentialQuestion, objectives });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/rubric-specs", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const {
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    objectives = [],
+    learningObjectives = [],
+    phases = [],
+  } = req.body || {};
+
+  const obj = [...(Array.isArray(learningObjectives) ? learningObjectives : []), ...(Array.isArray(objectives) ? objectives : [])]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  const phaseList = Array.isArray(phases)
+    ? phases.map((p, i) => ({ title: String(p?.title || "").trim(), description: String(p?.description || "").trim(), index: i }))
+    : [];
+  const usable = phaseList.filter((p) => p.title || p.description);
+  if (!usable.length) {
+    return res.status(400).json({ error: "At least one project phase with a title or description is required." });
+  }
+
+  const anchors = listPblRubricAnchorFamilies();
+  const n = usable.length;
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const phaseLines = usable.map((p) => `Phase ${p.index + 1} — ${p.title || "(untitled)"}: ${p.description || "(no description)"}`).join("\n");
+
+  const systemInstruction =
+    "You write assessment rubrics for grades 6–8 project-based learning. Reply with only valid JSON, no markdown fences.";
+
+  const prompt = `You are building milestone rubrics for a PBL unit. The school uses PBLworks-style performance columns (four levels) aligned with these rubric **families** (reference their spirit; do not claim to quote copyrighted text): ${anchors.join(", ")}.
+
+Project title: ${projectTitle}
+Essential question: ${essentialQuestion || "(not specified)"}
+Context / summary: ${projectSummary || "(not specified)"}
+Learning objectives (weave their language into product-focused criteria): ${obj.join(" | ") || "(none listed)"}
+
+Phases (in order):
+${phaseLines}
+
+Rules:
+- For each phase **except the last**, produce exactly **4** criteria. Each rubric is **product / phase deliverable** focused (what students make or do in that phase). Spread criteria across different knowledge types, skills, and **Bloom's taxonomy levels** (name the level in each criterion title or parenthetical when helpful).
+- For the **last** phase only, the rubric assesses the **final public product / culminating work** and must include **6** criteria. At least two criteria should explicitly reflect **collaboration** and **communication** (presenting, explaining, audience, feedback) in the sense of PBLworks **Collaboration** and **Complex Communication** rubrics; the other four should still tie to objectives and the product.
+- Every rubric uses these **four** performance columns only: **Beginning**, **Emerging**, **Developing**, **Demonstrating** (in that order). Each cell is one short student-friendly sentence (max ~220 characters).
+- Also include "studentTextFile": a plain-text version of that phase rubric suitable to save as a .txt handout: title line, blank line, then for each criterion a block: CRITERION NAME, then rows Beginning/Emerging/Developing/Demonstrating with indented lines.
+
+Return JSON shape:
+{"rubrics":[{"phaseIndex":number,"isFinal":boolean,"phaseTitle":"string","criteria":[{"name":"string","beginning":"string","emerging":"string","developing":"string","demonstrating":"string"}],"studentTextFile":"string"}]}
+
+You MUST return exactly ${usable.length} objects in "rubrics", one per phase above, in order from earliest to last phase.
+phaseIndex MUST be the 0-based index shown before each phase (use these exact values: ${usable.map((u) => u.index).join(", ")}).
+The rubric for the **highest** phaseIndex (${usable[usable.length - 1].index}) is the final product rubric: isFinal true, exactly 6 criteria. Every other rubric: isFinal false, exactly 4 criteria.`;
+
+  try {
+    const text = await geminiGenerateText(ai, prompt, systemInstruction);
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed?.rubrics || !Array.isArray(parsed.rubrics)) {
+      return res.status(422).json({ error: "Could not parse rubrics JSON.", raw: text.slice(0, 600) });
+    }
+    const byIndex = new Map();
+    for (const row of parsed.rubrics) {
+      const phaseIndex = Number(row.phaseIndex);
+      if (!Number.isFinite(phaseIndex) || phaseIndex < 0) continue;
+      const criteria = Array.isArray(row.criteria) ? row.criteria : [];
+      const isFinal = !!row.isFinal;
+      const expected = isFinal ? 6 : 4;
+      const trimmed = criteria.slice(0, expected).map((c) => ({
+        name: String(c?.name || "").trim(),
+        beginning: String(c?.beginning || "").trim(),
+        emerging: String(c?.emerging || "").trim(),
+        developing: String(c?.developing || "").trim(),
+        demonstrating: String(c?.demonstrating || "").trim(),
+      }));
+      while (trimmed.length < expected) {
+        trimmed.push({ name: "", beginning: "", emerging: "", developing: "", demonstrating: "" });
+      }
+      byIndex.set(phaseIndex, {
+        phaseIndex,
+        isFinal,
+        phaseTitle: String(row.phaseTitle || usable.find((u) => u.index === phaseIndex)?.title || `Phase ${phaseIndex + 1}`).trim(),
+        criteria: trimmed,
+        studentTextFile: String(row.studentTextFile || "").trim(),
+      });
+    }
+    const rubrics = [];
+    for (const u of usable) {
+      const row = byIndex.get(u.index);
+      if (!row) {
+        return res.status(422).json({
+          error: `Model did not return a rubric for phaseIndex ${u.index}.`,
+          raw: text.slice(0, 600),
+        });
+      }
+      const lastIdx = usable[usable.length - 1].index;
+      const expectFinal = u.index === lastIdx;
+      const expected = expectFinal ? 6 : 4;
+      if (row.criteria.length !== expected) {
+        return res.status(422).json({ error: `Wrong criterion count for phase ${u.index}.`, raw: text.slice(0, 600) });
+      }
+      const bad = row.criteria.some((c) => !c.name || !c.beginning || !c.emerging || !c.developing || !c.demonstrating);
+      if (bad) {
+        return res.status(422).json({ error: "Rubric criteria must all have non-empty names and four level descriptions.", raw: text.slice(0, 600) });
+      }
+      rubrics.push({
+        ...row,
+        isFinal: expectFinal,
+        phaseTitle: row.phaseTitle || u.title || `Phase ${u.index + 1}`,
+      });
+    }
+    res.json({ rubrics });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+app.post("/api/creator/rubric-chart", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const { studentTextFile = "", projectTitle = "", phaseTitle = "", isFinal = false } = req.body || {};
+  const text = String(studentTextFile || "").trim();
+  if (!text || text.length < 40) {
+    return res.status(400).json({ error: "studentTextFile (rubric text) is required." });
+  }
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const safeText = text.length > 12000 ? text.slice(0, 11900) + "\n…(truncated)" : text;
+  const imagePrompt = `Create a single-page, student-friendly printable rubric **infographic** (landscape proportions, high legibility).
+
+Design:
+- Big header: ${projectTitle || "Project"} — ${phaseTitle || "Milestone rubric"}${isFinal ? " (Final product)" : ""}.
+- Main content: a clear table. Columns: **Criteria** | **Beginning** | **Emerging** | **Developing** | **Demonstrating**.
+- Use short phrases from the source text below; you may tighten wording slightly for fit but keep meaning.
+- Large readable sans-serif type, plenty of padding, subtle grid lines, teal/navy/green accents suitable for middle school.
+- No tiny text; everything must stay readable when printed on one letter-sized page.
+
+Source rubric (authoritative wording to follow):
+---
+${safeText}
+---`;
+
+  try {
+    const img = await geminiGenerateRubricChartImage(ai, imagePrompt);
+    res.json({ mimeType: img.mimeType, imageBase64: img.data });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -848,8 +1227,7 @@ app.post("/api/chat/custom", async (req, res) => {
         const responseInstruction =
           (gem.systemInstruction || "") +
           `\n\n${projectContext}\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
-        const response = await ai.models.generateContent({
-          model,
+        const response = await geminiGenerateContentWithModelFallback(ai, chatModelCandidates(model), {
           contents,
           config: { systemInstruction: responseInstruction },
         });
@@ -946,8 +1324,7 @@ app.post("/api/chat", async (req, res) => {
         const responseInstruction =
           (gem.systemInstruction || "") +
           `\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
-        const response = await ai.models.generateContent({
-          model: gem.model,
+        const response = await geminiGenerateContentWithModelFallback(ai, chatModelCandidates(gem.model), {
           contents,
           config: { systemInstruction: responseInstruction },
         });

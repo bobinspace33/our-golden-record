@@ -2,6 +2,28 @@ const STORAGE_KEY = "aiCouncilSavedProjects";
 const DRAFT_STORAGE_KEY = "aiCouncilTemplateDrafts";
 /** ~330KB file as base64 — keeps localStorage under typical limits */
 const MAX_EMBEDDED_BRIEF_BASE64_LEN = 450000;
+/**
+ * Supporting docs are embedded as base64 inside draft JSON in localStorage (typically ~5MB per site).
+ * Large limits risk "QuotaExceeded" when saving drafts. Workarounds: use smaller files, fewer files,
+ * paste key excerpts into "Summary for AI", or (self-hosted) set before this script loads:
+ *   window.AI_COUNCIL_SUPPORTING_MAX_TOTAL   — max total base64 chars for all supporting files
+ *   window.AI_COUNCIL_SUPPORTING_MAX_PER_FILE — max base64 chars per file
+ */
+function supportingEmbedLimits() {
+  const defTotal = 1_200_000;
+  const defPerFile = 400_000;
+  const wT = Number(typeof window !== "undefined" && window.AI_COUNCIL_SUPPORTING_MAX_TOTAL);
+  const wP = Number(typeof window !== "undefined" && window.AI_COUNCIL_SUPPORTING_MAX_PER_FILE);
+  return {
+    total: Number.isFinite(wT) && wT >= 200_000 ? Math.min(Math.floor(wT), 3_500_000) : defTotal,
+    perFile: Number.isFinite(wP) && wP >= 50_000 ? Math.min(Math.floor(wP), 1_500_000) : defPerFile,
+  };
+}
+
+const MAX_SUPPORTING_FILES = 25;
+
+/** Set to `true` after QC — enables “Build assessment rubrics on launch” and council rubric UI. */
+const RUBRIC_CREATION_ENABLED = false;
 
 let currentDraftId = null;
 
@@ -22,7 +44,6 @@ function setCreatorLoading(show, message, subtext) {
 }
 
 const state = {
-  useCaptainPlanetPortraits: false,
   objectives: ["", ""],
   phases: [
     { title: "", description: "" },
@@ -32,15 +53,21 @@ const state = {
   ],
   members: [],
   memberCount: 4,
-  supportingMeta: [],
+  /** @type {Array<{ id: string, name: string, size: number, mimeType: string, data: string }>} */
+  supportingDocuments: [],
   settings: {
     pacingAlerts: false,
     reflectionLogs: false,
     familyPortal: false,
     collaborationMode: false,
+    buildRubricsOnLaunch: false,
   },
   /** Embedded brief from a loaded draft when file input cannot be repopulated */
   draftBriefAttachment: null,
+  /** @type {Array<{ phaseIndex: number, isFinal: boolean, phaseTitle: string, criteria: object[], studentTextFile: string }> | null} */
+  rubrics: null,
+  /** Invalidates cached rubrics when phases/title/objectives change */
+  rubricsCacheKey: "",
 };
 
 function escapeHtml(s) {
@@ -71,6 +98,8 @@ const PORTRAIT_FEMALE_NAMES = new Set([
   "nora", "olivia", "patricia", "priya", "rachel", "rebecca", "rosa", "rose", "ruby", "ruth", "sandra",
   "sara", "sarah", "sophia", "sophie", "stella", "stephanie", "susan", "tamara", "tanya", "tara", "theresa",
   "valerie", "vanessa", "vera", "victoria", "violet", "vivian", "wendy", "yasmin", "yuki", "zoe", "zara",
+  "adalyn", "aliyah", "brielle", "camila", "delilah", "elodie", "genevieve", "georgia", "imogen", "josephine",
+  "keira", "laila", "martina", "nadia", "ophelia", "penelope", "rosalia", "selena", "talia", "adelaide",
 ]);
 
 const PORTRAIT_MALE_NAMES = new Set([
@@ -86,7 +115,147 @@ const PORTRAIT_MALE_NAMES = new Set([
   "robert", "roger", "ronald", "ross", "roy", "ryan", "samuel", "scott", "sean", "stephen", "steven",
   "thomas", "timothy", "tyler", "victor", "vincent", "walter", "wayne", "william", "wolfgang", "zac",
   "zachary",
+  "adrian", "bruno", "caleb", "damian", "elias", "francis", "gavin", "hector", "ibrahim", "jonas", "kieran",
+  "leon", "malik", "nico", "orlando", "pierre", "quentin", "rafael", "sebastian", "theo",
 ]);
+
+/**
+ * Family / clan tokens (often last in Western order), varied origins.
+ * Kept disjoint from each other so the same token is not both male and female (that would force neutral).
+ * Matched only when different from the first given (see inferPortraitGenderFromName).
+ */
+const PORTRAIT_SURNAME_HINTS_FEMALE = [
+  "kaur",
+  "devi",
+  "begum",
+  "binti",
+  "petrova",
+  "ivanova",
+  "volkova",
+  "kuznetsova",
+  "kowalska",
+  "nowicka",
+  "wisniewska",
+  "jankowska",
+  "zielinska",
+  "novakova",
+  "horakova",
+  "popescu",
+  "ionescu",
+  "constantinescu",
+  "ndiaye",
+  "diop",
+  "sow",
+  "traore",
+  "touray",
+  "castillo",
+  "herrera",
+  "jimenez",
+  "alvarez",
+  "moreno",
+  "munoz",
+  "romero",
+  "navarro",
+  "medina",
+  "vega",
+  "castro",
+  "ortiz",
+  "ramos",
+  "reyes",
+  "mendoza",
+  "aguilar",
+  "vargas",
+  "contreras",
+  "guerrero",
+  "menendez",
+  "fernandez",
+  "rodriguez",
+  "martinez",
+  "garcia",
+  "lopez",
+  "gonzalez",
+  "perez",
+  "sanchez",
+  "ramirez",
+  "torres",
+  "flores",
+  "rivera",
+  "gomez",
+  "diaz",
+  "morales",
+  "gutierrez",
+  "ruiz",
+  "cruz",
+];
+const PORTRAIT_SURNAME_HINTS_MALE = [
+  "singh",
+  "kumar",
+  "malik",
+  "hossain",
+  "rahman",
+  "mukherjee",
+  "banerjee",
+  "chatterjee",
+  "nagarajan",
+  "subramanian",
+  "iyengar",
+  "kobayashi",
+  "tanaka",
+  "suzuki",
+  "sato",
+  "yamaguchi",
+  "nakamura",
+  "takahashi",
+  "inoue",
+  "wojcik",
+  "kowalski",
+  "nowak",
+  "wisniewski",
+  "kozlov",
+  "popov",
+  "petrov",
+  "novak",
+  "horvat",
+  "nikolic",
+  "papadopoulos",
+  "demetriou",
+  "georgiou",
+  "obrien",
+  "oconnor",
+  "murphy",
+  "walsh",
+  "byrne",
+  "doyle",
+  "kennedy",
+  "okoro",
+  "eze",
+  "nwosu",
+  "adebayo",
+  "mensah",
+  "boateng",
+  "kone",
+  "diallo",
+  "toure",
+  "nguyen",
+  "tran",
+  "pham",
+  "le",
+  "hoang",
+  "vu",
+  "dang",
+  "shah",
+  "mehta",
+  "desai",
+  "joshi",
+  "verma",
+  "gupta",
+  "chopra",
+  "bansal",
+  "saxena",
+];
+
+PORTRAIT_SURNAME_HINTS_FEMALE.forEach((s) => PORTRAIT_FEMALE_NAMES.add(s));
+PORTRAIT_SURNAME_HINTS_MALE.forEach((s) => PORTRAIT_MALE_NAMES.add(s));
 
 function firstGivenNameToken(name) {
   if (!name || typeof name !== "string") return "";
@@ -102,6 +271,22 @@ function firstGivenNameToken(name) {
   return first;
 }
 
+function lastFamilyNameToken(name) {
+  if (!name || typeof name !== "string") return "";
+  const cleaned = name.replace(/^[^a-zA-Z]+/, "").trim();
+  if (!cleaned) return "";
+  const parts = cleaned.split(/[\s,]+/).filter(Boolean);
+  if (parts.length < 2) return "";
+  const suffix = new Set(["jr", "sr", "ii", "iii", "iv", "phd", "md", "esq", "dce"]);
+  let i = parts.length - 1;
+  let t = parts[i].replace(/[^a-zA-Z'-]/g, "").toLowerCase().replace(/\.+$/, "");
+  while (i > 0 && suffix.has(t)) {
+    i -= 1;
+    t = parts[i].replace(/[^a-zA-Z'-]/g, "").toLowerCase().replace(/\.+$/, "");
+  }
+  return t || "";
+}
+
 function parsePortraitGender(raw) {
   const s = String(raw || "").trim().toLowerCase();
   if (s === "female" || s === "woman" || s === "f") return "female";
@@ -112,10 +297,16 @@ function parsePortraitGender(raw) {
 
 function inferPortraitGenderFromName(name) {
   const first = firstGivenNameToken(name);
-  if (!first) return "neutral";
+  const last = lastFamilyNameToken(name);
+  if (!first && !last) return "neutral";
   if (PORTRAIT_AMBIGUOUS_NAMES.has(first)) return "neutral";
-  if (PORTRAIT_MALE_NAMES.has(first)) return "male";
-  if (PORTRAIT_FEMALE_NAMES.has(first)) return "female";
+
+  const lastDistinct = last && last !== first;
+  let maleHit = PORTRAIT_MALE_NAMES.has(first) || (lastDistinct && PORTRAIT_MALE_NAMES.has(last));
+  let femaleHit = PORTRAIT_FEMALE_NAMES.has(first) || (lastDistinct && PORTRAIT_FEMALE_NAMES.has(last));
+  if (maleHit && femaleHit) return "neutral";
+  if (maleHit) return "male";
+  if (femaleHit) return "female";
   return "neutral";
 }
 
@@ -140,6 +331,90 @@ function getEssentialQuestion() {
 function avatarUrl(seed) {
   const s = encodeURIComponent((seed || "council").slice(0, 40));
   return `https://api.dicebear.com/7.x/notionists/svg?seed=${s}`;
+}
+
+/** Stock portraits under `/portraits/` — one per AI member per council, gender-matched when possible. */
+const STOCK_PORTRAIT_MALE = [
+  "/portraits/male01.png",
+  "/portraits/male02.png",
+  "/portraits/male03.png",
+  "/portraits/male04.png",
+  "/portraits/male05.png",
+  "/portraits/male06.png",
+  "/portraits/male07.png",
+  "/portraits/male08.png",
+];
+const STOCK_PORTRAIT_FEMALE = [
+  "/portraits/female01.png",
+  "/portraits/female02.png",
+  "/portraits/female03.png",
+  "/portraits/female04.png",
+  "/portraits/female05.png",
+  "/portraits/female06.png",
+  "/portraits/female07.png",
+  "/portraits/female08.png",
+];
+
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickUnusedStockPortrait(gender, usedSet) {
+  const male = STOCK_PORTRAIT_MALE;
+  const female = STOCK_PORTRAIT_FEMALE;
+  const pickFirst = (paths) => {
+    for (const p of shuffleArray(paths)) {
+      if (!usedSet.has(p)) return p;
+    }
+    return null;
+  };
+  if (gender === "male") {
+    return pickFirst(male) || pickFirst(female) || pickFirst([...male, ...female]);
+  }
+  if (gender === "female") {
+    return pickFirst(female) || pickFirst(male) || pickFirst([...male, ...female]);
+  }
+  return pickFirst(shuffleArray([...male, ...female])) || pickFirst(male) || pickFirst(female);
+}
+
+function assignStockPortraitsToAiMembers() {
+  const used = new Set();
+  const indices = shuffleArray(state.members.map((_, i) => i).filter((i) => !state.members[i].isHuman));
+  for (const i of indices) {
+    const m = state.members[i];
+    const g = effectivePortraitGender(m.portraitGender, m.name);
+    const path = pickUnusedStockPortrait(g, used);
+    if (path) used.add(path);
+    m.image = path || avatarUrl((m.name || `m${i}`).slice(0, 40));
+  }
+}
+
+function assignStockPortraitForAiMemberAt(idx) {
+  const m = state.members[idx];
+  if (!m || m.isHuman) return;
+  const used = new Set();
+  state.members.forEach((other, j) => {
+    if (j === idx || other.isHuman) return;
+    const im = String(other.image || "").trim();
+    if (im.startsWith("/portraits/")) used.add(im);
+  });
+  const g = effectivePortraitGender(m.portraitGender, m.name);
+  const path = pickUnusedStockPortrait(g, used);
+  m.image = path || avatarUrl((m.name || `m${idx}`).slice(0, 40));
+}
+
+function shouldMigrateAiImageToStock(image) {
+  const s = String(image || "").trim();
+  if (!s) return true;
+  if (s.startsWith("/portraits/")) return false;
+  if (/pollinations\.ai/i.test(s)) return true;
+  if (/dicebear\.com/i.test(s)) return true;
+  return false;
 }
 
 function uiAvatarsUrl(name) {
@@ -342,49 +617,6 @@ async function localExpertSearchAgain() {
   await fetchLocalExpertIntoModal(idx, true);
 }
 
-/** Full-color 90s Captain Planet–style cartoon portrait (Pollinations). Used when roles are generated. */
-function captainPlanetPortraitUrl(name, jobTitle, seedNum, portraitGender, memberIndex) {
-  const nameSafe = (name || "Council member").slice(0, 65);
-  const roleSafe = (jobTitle || "Advisor").slice(0, 85);
-  const seed = Number.isFinite(Number(seedNum)) ? Number(seedNum) : Math.floor(Math.random() * 1e9);
-  const idx = Number.isFinite(Number(memberIndex)) ? Number(memberIndex) : 0;
-  const gender =
-    portraitGender === "female" || portraitGender === "male" || portraitGender === "neutral"
-      ? portraitGender
-      : effectivePortraitGender(null, name);
-  const genderCue = portraitGenderPromptCue(gender);
-  const palettes = [
-    "emerald green gold and earth brown costume accents",
-    "sky blue silver and white Planeteer style",
-    "sunshine yellow red and blue heroic colors",
-    "purple magenta and turquoise cartoon brights",
-    "ocean teal coral and sandy gold",
-    "fire orange crimson and deep blue contrast",
-  ];
-  const palette = palettes[Math.abs(seed) % palettes.length];
-  const prompt =
-    `Full color cartoon illustration, 1990s Saturday morning TV animation, Captain Planet and the Planeteers art style, ` +
-    `vibrant saturated colors, thick black outlines, simple cel shading, heroic eco-team character design, ` +
-    `colorful costume with ${palette}, friendly expressive mentor face, ` +
-    `${genderCue}, ` +
-    `character ${nameSafe}, role ${roleSafe}, ` +
-    `composition variant ${idx + 1}, ` +
-    `head and shoulders portrait, soft gradient background, no text, no letters, no watermark, no logos`;
-  const encoded = encodeURIComponent(prompt.slice(0, 1100));
-  const nonce = encodeURIComponent(`${idx}-${Math.abs(seed) % 1e9}`);
-  return `https://image.pollinations.ai/prompt/${encoded}?width=320&height=320&seed=${seed}&nologo=true&nonce=${nonce}`;
-}
-
-function applyCaptainPlanetPortraits() {
-  state.useCaptainPlanetPortraits = true;
-  state.members.forEach((m, i) => {
-    if (!m.isHuman) {
-      const g = effectivePortraitGender(m.portraitGender, m.name);
-      m.image = captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97, g, i);
-    }
-  });
-}
-
 function syncMemberCount() {
   const n = Math.min(6, Math.max(2, Number(document.getElementById("memberCount")?.value) || 4));
   state.memberCount = n;
@@ -407,6 +639,9 @@ function syncMemberCount() {
   }
   while (state.members.length > n) state.members.pop();
   state.members.forEach(normalizeMemberHumanFields);
+  if (state.members.some((m) => !m.isHuman && shouldMigrateAiImageToStock(m.image))) {
+    assignStockPortraitsToAiMembers();
+  }
   renderMemberCards();
 }
 
@@ -472,6 +707,52 @@ function normalizeMemberPhaseArrays() {
   });
 }
 
+/** Apply API phasesEnabled; pad missing entries with true; ensure ≥1 true per member. */
+function coercePhasesEnabledFromApi(raw, phaseCount) {
+  const n = Math.max(0, Number(phaseCount) || 0);
+  if (!n) return [];
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return Array(n).fill(true);
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let v = i < raw.length ? raw[i] : true;
+    if (typeof v === "string") v = /^true|^yes|^1|^on/i.test(String(v).trim());
+    out.push(Boolean(v));
+  }
+  if (!out.some(Boolean)) out[0] = true;
+  return out;
+}
+
+/** Re-check phase P1…Pn for each member after phases change (or when roles already exist). */
+async function alignMemberPhaseAvailability() {
+  normalizeMemberPhaseArrays();
+  if (!state.members.some((m) => (m.name || "").trim())) return;
+  if (!state.phases.length) return;
+  const res = await fetch("/api/creator/align-member-phases", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectTitle: document.getElementById("projectTitle")?.value?.trim() || "",
+      projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
+      essentialQuestion: getEssentialQuestion(),
+      objectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+      phases: state.phases,
+      members: state.members.map((m) => ({
+        name: m.name,
+        jobTitle: m.jobTitle,
+        systemInstruction: m.systemInstruction,
+      })),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !Array.isArray(data.availability)) return;
+  data.availability.forEach((row, i) => {
+    if (!state.members[i]) return;
+    state.members[i].phasesEnabled = coercePhasesEnabledFromApi(row, state.phases.length);
+  });
+}
+
 function renderMemberCards() {
   const wrap = document.getElementById("memberCards");
   if (!wrap) return;
@@ -503,7 +784,7 @@ function renderMemberCards() {
           <button type="button" class="icon-circle icon-refresh" data-action="refresh" data-idx="${idx}" title="Regenerate role" aria-label="Regenerate role">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M23 4v6h-6M1 20v-6h6"/><path stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
           </button>
-          <button type="button" class="icon-circle icon-globe-btn" data-action="globe" data-idx="${idx}" title="Suggest local expert" aria-label="Suggest local expert">🌐</button>
+          <button type="button" class="icon-circle icon-globe-btn" data-action="globe" data-idx="${idx}" title="Suggest local expert" aria-label="Suggest local expert"><img class="globe-btn-icon" src="/globe.png" width="18" height="18" alt="" /></button>
         </div>
       </div>
       <div class="creator-member-fields">
@@ -528,10 +809,7 @@ function renderMemberCards() {
           if (field === "name") {
             m.portraitGender = inferPortraitGenderFromName(m.name);
           }
-          const g = effectivePortraitGender(m.portraitGender, m.name);
-          m.image = state.useCaptainPlanetPortraits
-            ? captainPlanetPortraitUrl(m.name, m.jobTitle, m.id * 7919 + i * 97, g, i)
-            : avatarUrl((m.name || `member${i}`).slice(0, 40));
+          assignStockPortraitForAiMemberAt(i);
           const img = wrap.querySelector(`[data-member-idx="${i}"] .creator-member-img`);
           if (img) img.src = m.image;
         }
@@ -594,6 +872,10 @@ async function suggestPhases() {
         description: p.description || "",
       }));
       renderPhases();
+      normalizeMemberPhaseArrays();
+      const sub = document.getElementById("creatorLoadingSub");
+      if (sub) sub.textContent = "Matching council members to each phase…";
+      await alignMemberPhaseAvailability().catch(() => {});
       renderMemberCards();
     }
   } catch (e) {
@@ -632,6 +914,7 @@ async function suggestMembers() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Request failed");
     if (data.members?.length) {
+      normalizeMemberPhaseArrays();
       data.members.forEach((row, i) => {
         if (!state.members[i]) return;
         state.members[i].name = row.name || "";
@@ -649,8 +932,9 @@ async function suggestMembers() {
           website: "",
         };
         state.members[i].portraitGender = effectivePortraitGender(row.portraitGender, row.name);
+        state.members[i].phasesEnabled = coercePhasesEnabledFromApi(row.phasesEnabled, state.phases.length);
       });
-      applyCaptainPlanetPortraits();
+      assignStockPortraitsToAiMembers();
       renderMemberCards();
     }
   } catch (e) {
@@ -697,16 +981,9 @@ async function regenerateMember(idx) {
     state.members[idx].jobTitle = data.jobTitle;
     state.members[idx].systemInstruction = data.systemInstruction || "";
     state.members[idx].isHuman = false;
-    state.useCaptainPlanetPortraits = true;
     const regenGender = effectivePortraitGender(data.portraitGender, data.name);
     state.members[idx].portraitGender = regenGender;
-    state.members[idx].image = captainPlanetPortraitUrl(
-      data.name,
-      data.jobTitle,
-      state.members[idx].id * 7919 + idx * 131 + Date.now() % 10000,
-      regenGender,
-      idx
-    );
+    assignStockPortraitForAiMemberAt(idx);
     state.members[idx].localExpert = null;
     state.members[idx].excludedLocalExperts = [];
     state.members[idx].humanContact = {
@@ -717,6 +994,8 @@ async function regenerateMember(idx) {
       email: "",
       website: "",
     };
+    normalizeMemberPhaseArrays();
+    state.members[idx].phasesEnabled = coercePhasesEnabledFromApi(data.phasesEnabled, state.phases.length);
     renderMemberCards();
   } catch (e) {
     err.textContent = e.message || String(e);
@@ -736,23 +1015,31 @@ async function localExpert(idx) {
 function renderSettings() {
   const grid = document.getElementById("settingsGrid");
   if (!grid) return;
+  if (!RUBRIC_CREATION_ENABLED) state.settings.buildRubricsOnLaunch = false;
   const items = [
     { key: "pacingAlerts", label: "Pacing reminders (placeholder)" },
     { key: "reflectionLogs", label: "Student reflection logs (placeholder)" },
     { key: "familyPortal", label: "Family summary emails (placeholder)" },
     { key: "collaborationMode", label: "Structured collaboration (placeholder)" },
+    {
+      key: "buildRubricsOnLaunch",
+      label:
+        "Build assessment rubrics on launch",
+      disabled: !RUBRIC_CREATION_ENABLED,
+    },
   ];
   grid.innerHTML = items
     .map(
       (item) => `
-    <label class="setting-row">
-      <input type="checkbox" data-setting="${item.key}" ${state.settings[item.key] ? "checked" : ""} />
+    <label class="setting-row${item.disabled ? " setting-row--disabled" : ""}"${item.disabled ? ' title="Rubric generation is paused while we complete quality checks."' : ""}>
+      <input type="checkbox" data-setting="${item.key}" ${state.settings[item.key] && !item.disabled ? "checked" : ""}${item.disabled ? " disabled" : ""} />
       <span>${escapeHtml(item.label)}</span>
     </label>`
     )
     .join("");
   grid.querySelectorAll("[data-setting]").forEach((cb) => {
     cb.addEventListener("change", () => {
+      if (cb.disabled) return;
       state.settings[cb.dataset.setting] = cb.checked;
     });
   });
@@ -783,6 +1070,142 @@ function inferMimeFromFileName(name) {
   if (n.endsWith(".html") || n.endsWith(".htm")) return "text/html";
   if (n.endsWith(".csv")) return "text/csv";
   return "application/octet-stream";
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function supportingDocKey(name, size) {
+  return `${String(name || "").toLowerCase()}\0${Number(size) || 0}`;
+}
+
+function totalSupportingEmbeddedBase64() {
+  return state.supportingDocuments.reduce((sum, d) => sum + (d.data ? d.data.length : 0), 0);
+}
+
+function normalizeSupportingDoc(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const id =
+    typeof raw.id === "string" && raw.id.trim()
+      ? raw.id.trim()
+      : typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `doc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const name = String(raw.name || "document").trim() || "document";
+  const size = Number(raw.size) || 0;
+  const mimeType = String(raw.mimeType || inferMimeFromFileName(name)).trim() || "application/octet-stream";
+  const data = typeof raw.data === "string" ? raw.data : "";
+  return { id, name, size, mimeType, data };
+}
+
+function renderSupportingFileList() {
+  const ul = document.getElementById("supportingFileList");
+  const label = document.getElementById("supportingListLabel");
+  if (!ul) return;
+  if (label) label.hidden = !state.supportingDocuments.length;
+  if (!state.supportingDocuments.length) {
+    ul.innerHTML = "";
+    return;
+  }
+  ul.innerHTML = state.supportingDocuments
+    .map((d) => {
+      const embedded = Boolean(d.data);
+      const badge = embedded
+        ? `<span class="supporting-doc-badge">Saved in draft</span>`
+        : `<span class="supporting-doc-badge supporting-doc-badge-muted">Name only — upload again to embed</span>`;
+      return `<li class="supporting-doc-row">
+        <span class="supporting-doc-main">
+          <span class="supporting-doc-name">${escapeHtml(d.name)}</span>
+          <span class="supporting-doc-size">${escapeHtml(formatFileSize(d.size))}</span>
+          ${badge}
+        </span>
+        <button type="button" class="supporting-doc-remove" data-remove-supporting="${escapeHtml(d.id)}">Remove</button>
+      </li>`;
+    })
+    .join("");
+  ul.querySelectorAll("[data-remove-supporting]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-remove-supporting");
+      state.supportingDocuments = state.supportingDocuments.filter((x) => x.id !== id);
+      renderSupportingFileList();
+    });
+  });
+}
+
+async function addSupportingFilesFromFileList(files) {
+  const status = document.getElementById("draftStatus");
+  const errEl = document.getElementById("creatorError");
+  if (errEl) errEl.hidden = true;
+  const picked = Array.from(files || []).filter(Boolean);
+  if (!picked.length) return;
+
+  const lim = supportingEmbedLimits();
+  const allowedExt = /\.(pdf|txt|md|csv|html|htm)$/i;
+  const existingKeys = new Set(
+    state.supportingDocuments.map((d) => supportingDocKey(d.name, d.size))
+  );
+  const messages = [];
+
+  for (const file of picked) {
+    if (state.supportingDocuments.length >= MAX_SUPPORTING_FILES) {
+      messages.push(`Stopped at ${MAX_SUPPORTING_FILES} files (limit reached).`);
+      break;
+    }
+    if (!allowedExt.test(file.name)) {
+      messages.push(`Skipped ${file.name} (use PDF, TXT, MD, CSV, or HTML).`);
+      continue;
+    }
+    const key = supportingDocKey(file.name, file.size);
+    if (existingKeys.has(key)) {
+      messages.push(`Skipped ${file.name} (already in your list).`);
+      continue;
+    }
+
+    let payload;
+    try {
+      payload = await readFileAsBase64Payload(file);
+    } catch {
+      messages.push(`Could not read ${file.name}.`);
+      continue;
+    }
+    if (!payload.data) {
+      messages.push(`Skipped ${file.name} (empty).`);
+      continue;
+    }
+    if (payload.data.length > lim.perFile) {
+      messages.push(`Skipped ${file.name} (exceeds per-file size allowed for draft storage).`);
+      continue;
+    }
+    const nextTotal = totalSupportingEmbeddedBase64() + payload.data.length;
+    if (nextTotal > lim.total) {
+      messages.push(
+        `Skipped ${file.name} (would exceed combined supporting-file size for drafts). Remove a file, use smaller PDFs, or add excerpts to the summary instead.`
+      );
+      continue;
+    }
+
+    const id =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `doc-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    state.supportingDocuments.push({
+      id,
+      name: payload.name || file.name,
+      size: file.size,
+      mimeType: payload.mimeType || inferMimeFromFileName(file.name),
+      data: payload.data,
+    });
+    existingKeys.add(key);
+  }
+
+  renderSupportingFileList();
+  if (messages.length && status) {
+    status.textContent = messages.slice(0, 4).join(" ") + (messages.length > 4 ? " …" : "");
+  }
 }
 
 function readBriefFile() {
@@ -821,13 +1244,20 @@ function collectDraftSnapshot() {
     projectTitle,
     projectSummary,
     essentialQuestion,
-    useCaptainPlanetPortraits: state.useCaptainPlanetPortraits,
     objectives: state.objectives.slice(),
     phases: state.phases.map((p) => ({ title: p.title || "", description: p.description || "" })),
     members: state.members.map((m) => JSON.parse(JSON.stringify(m))),
     memberCount: state.memberCount,
     settings: { ...state.settings },
-    supportingMeta: state.supportingMeta.slice(),
+    supportingDocuments: state.supportingDocuments.map((d) => ({
+      id: d.id,
+      name: d.name,
+      size: d.size,
+      mimeType: d.mimeType,
+      data: d.data || "",
+    })),
+    rubrics: state.rubrics ? JSON.parse(JSON.stringify(state.rubrics)) : null,
+    rubricsCacheKey: state.rubricsCacheKey || "",
   };
 }
 
@@ -837,7 +1267,6 @@ function updateDraftBriefNote() {
 }
 
 function applyDraftSnapshot(snapshot) {
-  state.useCaptainPlanetPortraits = !!snapshot.useCaptainPlanetPortraits;
   state.objectives = Array.isArray(snapshot.objectives) && snapshot.objectives.length
     ? snapshot.objectives.slice()
     : ["", ""];
@@ -854,15 +1283,38 @@ function applyDraftSnapshot(snapshot) {
     ? snapshot.members.map((m) => JSON.parse(JSON.stringify(m)))
     : [];
   state.members.forEach(normalizeMemberHumanFields);
+  if (state.members.some((m) => !m.isHuman && shouldMigrateAiImageToStock(m.image))) {
+    assignStockPortraitsToAiMembers();
+  }
   state.memberCount = Math.min(6, Math.max(2, Number(snapshot.memberCount) || 4));
   state.settings = {
     pacingAlerts: false,
     reflectionLogs: false,
     familyPortal: false,
     collaborationMode: false,
+    buildRubricsOnLaunch: false,
     ...(snapshot.settings || {}),
   };
-  state.supportingMeta = Array.isArray(snapshot.supportingMeta) ? snapshot.supportingMeta.slice() : [];
+  if (!RUBRIC_CREATION_ENABLED) state.settings.buildRubricsOnLaunch = false;
+  if (Array.isArray(snapshot.supportingDocuments) && snapshot.supportingDocuments.length) {
+    state.supportingDocuments = snapshot.supportingDocuments
+      .map(normalizeSupportingDoc)
+      .filter(Boolean);
+  } else if (Array.isArray(snapshot.supportingMeta) && snapshot.supportingMeta.length) {
+    state.supportingDocuments = snapshot.supportingMeta.map((m, i) =>
+      normalizeSupportingDoc({
+        id: `legacy-${i}`,
+        name: m.name,
+        size: m.size,
+        mimeType: inferMimeFromFileName(m.name),
+        data: "",
+      })
+    );
+  } else {
+    state.supportingDocuments = [];
+  }
+  state.rubrics = Array.isArray(snapshot.rubrics) ? JSON.parse(JSON.stringify(snapshot.rubrics)) : null;
+  state.rubricsCacheKey = typeof snapshot.rubricsCacheKey === "string" ? snapshot.rubricsCacheKey : "";
   state.draftBriefAttachment =
     snapshot.briefAttachment && snapshot.briefAttachment.data ? snapshot.briefAttachment : null;
 
@@ -875,10 +1327,7 @@ function applyDraftSnapshot(snapshot) {
   if (eq) eq.value = snapshot.essentialQuestion || "";
   if (mc) mc.value = String(state.memberCount);
 
-  const ul = document.getElementById("supportingFileList");
-  if (ul) {
-    ul.innerHTML = state.supportingMeta.map((f) => `<li>${escapeHtml(f.name)}</li>`).join("");
-  }
+  renderSupportingFileList();
 
   updateDraftBriefNote();
   renderObjectives();
@@ -942,7 +1391,21 @@ async function saveCouncilDraft() {
     updatedAt: now,
     snapshot,
   });
-  saveDraftRecords(list);
+  try {
+    saveDraftRecords(list);
+  } catch (e) {
+    const q = String(e?.name || e?.message || e || "").toLowerCase();
+    if (q.includes("quota") || q.includes("exceeded")) {
+      if (err) {
+        err.textContent =
+          "Draft could not be saved: browser storage is full. Remove some supporting documents or use smaller files, then try again.";
+        err.hidden = false;
+      }
+      if (status) status.textContent = "";
+      return;
+    }
+    throw e;
+  }
   currentDraftId = id;
 
   try {
@@ -951,7 +1414,11 @@ async function saveCouncilDraft() {
     /* ignore */
   }
 
+  const embeddedSupporting = state.supportingDocuments.filter((d) => d.data).length;
   let msg = "Draft saved. You can reopen it from the home page.";
+  if (embeddedSupporting) {
+    msg += ` ${embeddedSupporting} supporting file(s) are stored in this draft.`;
+  }
   if (briefSkipped) {
     msg += " Project brief was not embedded (file too large)—add it again when you continue, or rely on your summary text.";
   }
@@ -976,6 +1443,51 @@ async function resolveBriefForLaunch() {
   }
   if (state.draftBriefAttachment?.data) return state.draftBriefAttachment;
   return null;
+}
+
+function phasesPayloadForApi() {
+  return state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim());
+}
+
+function rubricsCacheKeyFromForm() {
+  const title = document.getElementById("projectTitle")?.value?.trim() || "";
+  const objectives = state.objectives.map((o) => o.trim()).filter(Boolean).join("|");
+  const ph = phasesPayloadForApi()
+    .map((p) => `${(p.title || "").trim()}\t${(p.description || "").trim()}`)
+    .join(";;");
+  return [title, objectives, ph].join(":::");
+}
+
+async function fetchRubricSpecsFromForm() {
+  const title = document.getElementById("projectTitle")?.value?.trim() || "";
+  const phases = phasesPayloadForApi();
+  if (!phases.length) {
+    throw new Error("Add at least one phase with a title or description before creating rubrics.");
+  }
+  const cacheKey = rubricsCacheKeyFromForm();
+  if (state.rubrics?.length && state.rubricsCacheKey === cacheKey) {
+    return state.rubrics;
+  }
+  const res = await fetch("/api/creator/rubric-specs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectTitle: title,
+      projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
+      essentialQuestion: getEssentialQuestion(),
+      objectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+      learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+      phases,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Could not build rubrics.");
+  if (!Array.isArray(data.rubrics) || !data.rubrics.length) {
+    throw new Error("No rubrics returned from the server.");
+  }
+  state.rubrics = data.rubrics;
+  state.rubricsCacheKey = cacheKey;
+  return state.rubrics;
 }
 
 async function analyzeBriefFile(file) {
@@ -1051,25 +1563,45 @@ function launchCouncil() {
       ? crypto.randomUUID()
       : `council-${Date.now()}`;
 
-  const config = {
-    projectTitle: title,
-    projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
-    essentialQuestion: document.getElementById("essentialQuestion")?.value?.trim() || "",
-    learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
-    phases: state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim()),
-    members: state.members.map((m) => ({ ...m })),
-    settings: { ...state.settings },
-    briefAttachment: null,
-    supportingAttachments: [],
-  };
-
   setCreatorLoading(
     true,
     "Preparing your council…",
-    "Reading your project brief (if uploaded) and saving your council before opening."
+    state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED
+      ? "Building rubrics, reading your project brief (if any), and saving before opening."
+      : "Reading your project brief (if uploaded) and saving your council before opening."
   );
   resolveBriefForLaunch()
-    .then((brief) => {
+    .then(async (brief) => {
+      if (state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED) {
+        setCreatorLoading(
+          true,
+          "Building assessment rubrics…",
+          "Creating criteria for each phase (Beginning → Demonstrating)."
+        );
+        try {
+          await fetchRubricSpecsFromForm();
+        } catch (e) {
+          err.textContent = e.message || String(e);
+          err.hidden = false;
+          return;
+        }
+      }
+
+      const config = {
+        projectTitle: title,
+        projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
+        essentialQuestion: document.getElementById("essentialQuestion")?.value?.trim() || "",
+        learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+        phases: state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim()),
+        members: state.members.map((m) => ({ ...m })),
+        settings: { ...state.settings },
+        briefAttachment: null,
+        supportingAttachments: state.supportingDocuments
+          .filter((d) => d.data)
+          .map((d) => ({ name: d.name, mimeType: d.mimeType, data: d.data })),
+        rubrics: state.rubrics ? JSON.parse(JSON.stringify(state.rubrics)) : null,
+        rubricsCacheKey: state.rubricsCacheKey || "",
+      };
       if (brief?.data) config.briefAttachment = brief;
       try {
         sessionStorage.setItem("aiCouncilActiveProject", JSON.stringify(config));
@@ -1102,6 +1634,10 @@ function launchCouncil() {
 
       window.location.href = `/council.html?saved=${encodeURIComponent(id)}`;
     })
+    .catch((e) => {
+      err.textContent = e?.message || String(e);
+      err.hidden = false;
+    })
     .finally(() => setCreatorLoading(false));
 }
 
@@ -1122,6 +1658,7 @@ document.getElementById("memberCount")?.addEventListener("change", () => {
   syncMemberCount();
 });
 document.getElementById("launchCouncilBtn")?.addEventListener("click", launchCouncil);
+
 document.getElementById("lemYes")?.addEventListener("click", () => {
   const idx = localExpertModal.memberIdx;
   const data = localExpertModal.data;
@@ -1157,12 +1694,16 @@ document.getElementById("briefFile")?.addEventListener("change", (e) => {
 });
 
 document.getElementById("supportingFiles")?.addEventListener("change", (e) => {
-  const files = Array.from(e.target.files || []);
-  const ul = document.getElementById("supportingFileList");
-  state.supportingMeta = files.map((f) => ({ name: f.name, size: f.size }));
-  if (ul) {
-    ul.innerHTML = state.supportingMeta.map((f) => `<li>${escapeHtml(f.name)}</li>`).join("");
-  }
+  const inp = e.target;
+  const files = Array.from(inp.files || []);
+  inp.value = "";
+  addSupportingFilesFromFileList(files).catch((err) => {
+    const errEl = document.getElementById("creatorError");
+    if (errEl) {
+      errEl.textContent = err.message || String(err);
+      errEl.hidden = false;
+    }
+  });
 });
 
 (function initCreateForm() {
@@ -1179,4 +1720,5 @@ document.getElementById("supportingFiles")?.addEventListener("change", (e) => {
   renderPhases();
   syncMemberCount();
   renderSettings();
+  renderSupportingFileList();
 })();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Your AI Council</title>
+  <title>Your PBL Council</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -16,7 +16,7 @@
     </nav>
     <header class="header">
       <div class="header-row">
-        <h1 id="councilPageTitle">Your AI Council</h1>
+        <h1 id="councilPageTitle">Your PBL Council</h1>
         <div class="recent-chats-wrap">
           <button type="button" class="recent-chats-btn" id="recentChatsBtn" aria-haspopup="true" aria-expanded="false">Recent Chats</button>
           <div class="recent-chats-dropdown" id="recentChatsDropdown" hidden>
@@ -33,16 +33,25 @@
       <div class="phase-options" role="group" aria-label="Project Phase">
         <!-- Filled by JS from your project phases -->
       </div>
-      <span id="phaseMilestoneTitle" class="phase-milestone-title" aria-live="polite">—</span>
-      <a
-        href="#"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="project-brief-btn"
-        id="customProjectBriefLink"
-        hidden
-      >Project Brief</a>
+      <div class="phase-section-trailing">
+        <button type="button" class="btn-cta-blue phase-view-rubric-btn" id="viewRubricCouncilBtn" hidden>
+          View Rubric
+        </button>
+        <a
+          href="#"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="project-brief-btn"
+          id="customProjectBriefLink"
+          hidden
+        >Project Brief</a>
+      </div>
     </section>
+
+    <div class="phase-milestone-banner" id="phaseMilestoneBanner" role="region" aria-labelledby="phaseMilestoneBannerHeading" aria-live="polite">
+      <p class="phase-milestone-banner-heading" id="phaseMilestoneBannerHeading">Milestone for this phase</p>
+      <p class="phase-milestone-banner-text" id="phaseMilestoneBannerText">—</p>
+    </div>
 
     <section class="gems-section">
       <h2>Select Members</h2>
@@ -102,6 +111,49 @@
     <div class="status" id="status" aria-live="polite"></div>
   </div>
 
+  <div class="overlay rubric-preconfirm-overlay" id="rubricPreconfirmOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="rubricPreconfirmTitle">
+    <div class="rubric-preconfirm-backdrop" id="rubricPreconfirmBackdrop"></div>
+    <div class="rubric-preconfirm-panel">
+      <h2 class="rubric-preconfirm-title" id="rubricPreconfirmTitle">Create rubric</h2>
+      <p class="rubric-preconfirm-text" id="rubricPreconfirmMessage">
+        Do you want to edit learning objectives or project phases before creating the rubric?
+      </p>
+      <div class="rubric-preconfirm-actions">
+        <button type="button" class="btn-secondary" id="rubricPreconfirmNo">No</button>
+        <button type="button" class="btn-cta-blue" id="rubricPreconfirmYes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay rubric-edit-overlay" id="rubricEditOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="rubricEditTitle">
+    <div class="rubric-edit-backdrop" id="rubricEditBackdrop"></div>
+    <div class="rubric-edit-panel">
+      <div class="rubric-edit-header">
+        <h2 class="rubric-edit-title" id="rubricEditTitle">Edit project details</h2>
+        <button type="button" class="rubric-edit-close" id="rubricEditClose" aria-label="Close">×</button>
+      </div>
+      <div class="rubric-edit-scroll">
+        <label class="rubric-edit-label" for="rubricEditEssentialQuestion">Essential question</label>
+        <textarea id="rubricEditEssentialQuestion" class="rubric-edit-textarea" rows="2" placeholder="Driving question for the unit…"></textarea>
+
+        <label class="rubric-edit-label" for="rubricEditObjectives">Learning objectives <span class="rubric-edit-hint">(one per line)</span></label>
+        <textarea id="rubricEditObjectives" class="rubric-edit-textarea" rows="4" placeholder="One learning objective per line"></textarea>
+
+        <p class="rubric-edit-label">Project phases</p>
+        <div id="rubricEditPhases" class="rubric-edit-phases"></div>
+
+        <label class="rubric-edit-label" for="rubricEditSupportingFiles">Supporting documents</label>
+        <p class="rubric-edit-hint">Add PDF, TXT, MD, or HTML files. They are stored in this project in the browser.</p>
+        <input type="file" id="rubricEditSupportingFiles" class="rubric-edit-file" accept=".pdf,.txt,.md,.html,text/*" multiple />
+        <ul class="rubric-edit-file-list" id="rubricEditSupportingList"></ul>
+      </div>
+      <div class="rubric-edit-actions">
+        <button type="button" class="btn-secondary" id="rubricEditSaveProject">Save project</button>
+        <button type="button" class="btn-cta-blue" id="rubricEditCreateRubric">Create rubric</button>
+      </div>
+    </div>
+  </div>
+
   <div class="overlay council-loading-overlay" id="councilLoading" hidden aria-live="polite" aria-busy="true">
     <div class="council-loading-backdrop"></div>
     <div class="council-loading-panel">
@@ -122,6 +174,63 @@
       <div class="overlay-actions">
         <button type="button" class="btn-secondary" id="sendToCancel">Cancel</button>
         <button type="button" class="submit-btn" id="sendToConfirm">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay replace-human-preconfirm-overlay" id="replaceHumanPreconfirmOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="replaceHumanPreconfirmTitle">
+    <div class="replace-human-preconfirm-backdrop" id="replaceHumanPreconfirmBackdrop"></div>
+    <div class="replace-human-preconfirm-panel">
+      <h2 class="replace-human-preconfirm-title" id="replaceHumanPreconfirmTitle">Replace member</h2>
+      <p class="replace-human-preconfirm-text" id="replaceHumanPreconfirmMessage">Replace with human council member?</p>
+      <div class="replace-human-preconfirm-actions">
+        <button type="button" class="btn-secondary" id="replaceHumanPreconfirmNo">No</button>
+        <button type="button" class="btn-cta-blue" id="replaceHumanPreconfirmYes">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay replace-human-editor-overlay" id="replaceHumanEditorOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="replaceHumanEditorTitle">
+    <div class="replace-human-editor-backdrop" id="replaceHumanEditorBackdrop"></div>
+    <div class="replace-human-editor-panel">
+      <div class="replace-human-editor-header">
+        <h2 class="replace-human-editor-title" id="replaceHumanEditorTitle">Human council member</h2>
+        <button type="button" class="replace-human-editor-close" id="replaceHumanEditorClose" aria-label="Close">×</button>
+      </div>
+      <div class="replace-human-editor-scroll">
+        <label class="replace-human-editor-label" for="rhName">Name</label>
+        <input type="text" id="rhName" class="replace-human-editor-input" autocomplete="name" />
+
+        <label class="replace-human-editor-label" for="rhTitle">Title</label>
+        <input type="text" id="rhTitle" class="replace-human-editor-input" autocomplete="organization-title" />
+
+        <label class="replace-human-editor-label" for="rhOrganization">Organization</label>
+        <input type="text" id="rhOrganization" class="replace-human-editor-input" autocomplete="organization" />
+
+        <label class="replace-human-editor-label" for="rhEmail">Email</label>
+        <input type="email" id="rhEmail" class="replace-human-editor-input" autocomplete="email" />
+
+        <label class="replace-human-editor-label" for="rhPhone">Phone</label>
+        <input type="tel" id="rhPhone" class="replace-human-editor-input" autocomplete="tel" />
+
+        <label class="replace-human-editor-label" for="rhWebsite">Website</label>
+        <input type="url" id="rhWebsite" class="replace-human-editor-input" placeholder="https://…" autocomplete="url" />
+
+        <p class="replace-human-editor-label">Profile image</p>
+        <p class="replace-human-editor-hint">Click the photo to upload a file, or paste an image URL below.</p>
+        <div class="replace-human-avatar-wrap">
+          <button type="button" class="replace-human-avatar-hit" id="replaceHumanAvatarHit" aria-label="Choose profile image file">
+            <img id="rhProfilePreview" class="replace-human-avatar-preview" width="96" height="96" alt="" hidden />
+            <span id="rhProfilePlaceholder" class="replace-human-avatar-placeholder">Photo</span>
+          </button>
+          <input type="file" id="rhProfileFile" accept="image/*" hidden />
+        </div>
+        <label class="replace-human-editor-label" for="rhProfileUrl">Image URL (optional)</label>
+        <input type="url" id="rhProfileUrl" class="replace-human-editor-input" placeholder="https://…" />
+      </div>
+      <div class="replace-human-editor-actions">
+        <button type="button" class="btn-secondary" id="replaceHumanEditorCancel">Cancel</button>
+        <button type="button" class="btn-cta-blue" id="replaceHumanEditorSave">Save</button>
       </div>
     </div>
   </div>

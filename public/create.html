@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Create AI Council</title>
+  <title>Create PBL Council</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -30,7 +30,7 @@
       <section class="creator-block">
         <h2 class="creator-block-title">1. Project brief</h2>
         <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline (PDF or text). If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
-        <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file (embedded). Upload a new file to replace it.</p>
+        <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file. Upload a new file to replace it.</p>
         <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,text/*" class="creator-file" />
         <label class="creator-label" for="projectSummary">Summary for AI (paste key points if the file is large)</label>
         <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the project brief…"></textarea>
@@ -52,30 +52,33 @@
 
       <section class="creator-block">
         <h2 class="creator-block-title">3. Supporting documents</h2>
-        <p class="creator-hint">Standards, rubrics, or context (PDF, TXT, MD, CSV, HTML).</p>
+        <p class="creator-hint">
+          Standards, rubrics, or context (PDF, TXT, MD, CSV, HTML).
+        </p>
         <input type="file" id="supportingFiles" accept=".pdf,.txt,.md,.csv,.html,text/*" multiple class="creator-file" />
-        <ul class="creator-file-list" id="supportingFileList"></ul>
+        <p class="supporting-list-label" id="supportingListLabel" hidden>Uploaded supporting files</p>
+        <ul class="creator-file-list supporting-file-list" id="supportingFileList"></ul>
       </section>
 
       <section class="creator-block">
         <h2 class="creator-block-title">4. Learning objectives</h2>
-        <p class="creator-hint">2–4 objectives recommended. Uploading a project brief (above) can auto-fill objectives—for example, from PBL Works sections like “Build Knowledge” and “Develop &amp; Critique.”</p>
+        <p class="creator-hint">2–4 objectives recommended. Uploading a project brief can auto-fill objectives.”</p>
         <div id="objectivesList" class="objectives-list"></div>
-        <button type="button" class="btn-secondary" id="addObjectiveBtn">+ Add objective</button>
+        <button type="button" class="btn-add-row" id="addObjectiveBtn">+ Add objective</button>
       </section>
 
       <section class="creator-block">
         <h2 class="creator-block-title">5. Project phases</h2>
         <div class="creator-toolbar">
-          <button type="button" class="btn-secondary" id="suggestPhasesBtn">Suggest phases from summary</button>
+          <button type="button" class="btn-cta-green" id="suggestPhasesBtn">Suggest phases from summary</button>
         </div>
         <div class="phases-grid" id="phasesGrid"></div>
-        <button type="button" class="btn-secondary" id="addPhaseBtn">+ Add phase row</button>
+        <button type="button" class="btn-add-row" id="addPhaseBtn">+ Add phase row</button>
       </section>
 
       <section class="creator-block">
         <h2 class="creator-block-title">6. Council members</h2>
-        <p class="creator-hint">Between 2 and 6 AI advisors. The first two can be filled automatically from your template.</p>
+        <p class="creator-hint">Between 2 and 6 council members. Click Globe icon to search for a local expert.</p>
         <div class="creator-toolbar">
           <label>Council size
             <select id="memberCount" class="creator-select">
@@ -86,7 +89,7 @@
               <option value="6">6</option>
             </select>
           </label>
-          <button type="button" class="btn-secondary" id="suggestMembersBtn">Generate roles from template</button>
+          <button type="button" class="btn-cta-green" id="suggestMembersBtn">Generate Council</button>
         </div>
         <div id="memberCards" class="member-cards"></div>
       </section>
