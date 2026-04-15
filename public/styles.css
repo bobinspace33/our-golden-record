@@ -808,11 +808,47 @@ body[data-app="custom"] .upload-btn:hover {
 .send-to-item .send-to-name {
   font-weight: 600;
   font-size: 0.95rem;
+  color: #fff;
 }
 
 .send-to-item .send-to-job {
   font-size: 0.85rem;
   color: var(--text-muted);
+}
+
+.send-to-item.send-to-item--human {
+  border-left: 3px solid #24bae0;
+}
+
+.send-to-human-panel .send-to-human-note-label {
+  display: block;
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.send-to-human-note-input {
+  width: 100%;
+  min-height: 6rem;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.65rem;
+  box-sizing: border-box;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.overlay-body-text {
+  margin: 0 0 1.1rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text);
 }
 
 .overlay-actions {
@@ -1712,6 +1748,30 @@ body[data-app="custom"] .upload-btn:hover {
   font-size: 0.82rem;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+.replace-human-editor-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.85rem;
+}
+
+.replace-human-editor-checkbox {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  accent-color: #1e3a5f;
+  cursor: pointer;
+}
+
+.replace-human-editor-checkbox-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.35;
+  cursor: pointer;
 }
 
 .replace-human-editor-input {

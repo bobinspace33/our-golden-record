@@ -134,6 +134,18 @@ let lastSelectedGems = [];
 let lastResults = [];
 let sendToSource = null; // { gemId, name, response } when overlay is open
 let sendToSelectedIds = new Set();
+/** When sending to human members: note + confirm steps before stub email + optional AI opinion fetch. */
+let pendingSendTo = null;
+/** Last introductory note from the human-email flow (for future server wiring). */
+let lastHumanEmailIntroNote = "";
+
+function formatEnglishNames(names) {
+  const list = (names || []).map((n) => String(n || "").trim()).filter(Boolean);
+  if (list.length === 0) return "";
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
+}
 let attachments = []; // { name, mimeType, data (base64) }
 
 const APP_KIND = document.body.dataset.app || "golden-record";
@@ -287,6 +299,8 @@ async function runReplaceHumanLocalSearch() {
     if (titleEl) titleEl.value = data.title || "";
     if (orgEl) orgEl.value = data.organization || "";
     if (emailEl) emailEl.value = split.email || "";
+    const rhEmailPrompts = document.getElementById("rhEmailPromptsToMember");
+    if (rhEmailPrompts) rhEmailPrompts.checked = false;
     if (phoneEl) phoneEl.value = split.phone || "";
     if (webEl) webEl.value = split.website || "";
     replaceHumanPendingImage = null;
@@ -772,9 +786,10 @@ function renderGems() {
       ? `<img class="gem-card-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="${pollinationsThumb ? "eager" : "lazy"}" />`
       : "";
     const replaceHumanBtnSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+    const replaceHumanBtnLabel = isHuman ? "Edit human council member profile" : "Replace with human council member";
     const replaceHumanBtnHtml =
       enabled && APP_KIND === "custom"
-        ? `<button type="button" class="gem-replace-human-hit" data-replace-human-gem="${gem.id}" title="Replace with human council member" aria-label="Replace with human council member">${replaceHumanBtnSvg}</button>`
+        ? `<button type="button" class="gem-replace-human-hit" data-replace-human-gem="${gem.id}" title="${replaceHumanBtnLabel}" aria-label="${replaceHumanBtnLabel}">${replaceHumanBtnSvg}</button>`
         : "";
 
     if (isHuman) {
@@ -782,11 +797,19 @@ function renderGems() {
       card.tabIndex = enabled ? 0 : -1;
       card.innerHTML = `
         ${imgHtml}
+        ${replaceHumanBtnHtml}
         <span class="gem-name">${escapeHtml(gem.name)}</span>
         <span class="gem-job-title">${escapeHtml(gem.jobTitle || "")}</span>
       `;
+      card.querySelector(".gem-replace-human-hit")?.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        replaceHumanGemId = gem.id;
+        openReplaceHumanEditor();
+      });
       if (enabled) {
-        card.addEventListener("click", () => {
+        card.addEventListener("click", (e) => {
+          if (e.target.closest(".gem-replace-human-hit")) return;
           if (selectedIds.has(gem.id)) {
             selectedIds.delete(gem.id);
           } else {
@@ -848,6 +871,14 @@ function escapeHtml(s) {
   const div = document.createElement("div");
   div.textContent = s;
   return div.innerHTML;
+}
+
+/** Display name in response card headers: suffix for AI members only. */
+function formatResponseCardMemberName(displayName, gem) {
+  const base = String(displayName || "").trim();
+  const isHuman = gem && gem.isHuman === true;
+  if (isHuman) return base || "—";
+  return base ? `${base} (AI Council Member)` : "AI Council Member";
 }
 
 const URL_REGEX = /https?:\/\/[^\s<>"\']+|www\.[^\s<>"\']+/gi;
@@ -1007,17 +1038,32 @@ function populateReplaceHumanEditorFromGem() {
   const titleEl = document.getElementById("rhTitle");
   const orgEl = document.getElementById("rhOrganization");
   const emailEl = document.getElementById("rhEmail");
+  const emailPromptsEl = document.getElementById("rhEmailPromptsToMember");
   const phoneEl = document.getElementById("rhPhone");
   const webEl = document.getElementById("rhWebsite");
   const urlEl = document.getElementById("rhProfileUrl");
-  if (nameEl) nameEl.value = gem?.name || mm?.name || "";
-  if (titleEl) titleEl.value = gem?.jobTitle || mm?.jobTitle || "";
-  if (orgEl) orgEl.value = "";
-  if (emailEl) emailEl.value = "";
-  if (phoneEl) phoneEl.value = "";
-  if (webEl) webEl.value = "";
-  if (urlEl) urlEl.value = "";
-  updateReplaceHumanProfilePreview("");
+  const hc = mm?.humanContact && typeof mm.humanContact === "object" ? mm.humanContact : {};
+  const editingHuman = !!(gem?.isHuman && mm?.isHuman);
+  if (nameEl) nameEl.value = String(hc.name || gem?.name || mm?.name || "").trim();
+  if (titleEl) titleEl.value = String(hc.title || gem?.jobTitle || mm?.jobTitle || "").trim();
+  if (orgEl) orgEl.value = String(hc.organization || "").trim();
+  if (emailEl) emailEl.value = String(hc.email || "").trim();
+  if (emailPromptsEl) emailPromptsEl.checked = !!hc.emailPromptsToMember;
+  if (phoneEl) phoneEl.value = String(hc.phone || "").trim();
+  if (webEl) webEl.value = String(hc.website || "").trim();
+  const portrait = String(mm?.image || gem?.image || "").trim();
+  if (urlEl) {
+    if (
+      editingHuman &&
+      /^https?:\/\//i.test(portrait) &&
+      !/ui-avatars\.com\/api\//i.test(portrait)
+    ) {
+      urlEl.value = portrait;
+    } else {
+      urlEl.value = "";
+    }
+  }
+  updateReplaceHumanProfilePreview(portrait);
 }
 
 function openReplaceHumanEditor() {
@@ -1042,6 +1088,7 @@ function applyReplaceHumanEditorSave() {
     closeReplaceHumanEditor();
     return;
   }
+  const wasAlreadyHuman = !!mm.isHuman;
   const name = document.getElementById("rhName")?.value?.trim() || "";
   if (!name) {
     setStatus("Enter a name for the human council member.", "error");
@@ -1050,12 +1097,16 @@ function applyReplaceHumanEditorSave() {
   const title = document.getElementById("rhTitle")?.value?.trim() || "";
   const organization = document.getElementById("rhOrganization")?.value?.trim() || "";
   const email = document.getElementById("rhEmail")?.value?.trim() || "";
+  const emailPromptsToMember = !!document.getElementById("rhEmailPromptsToMember")?.checked;
   const phone = document.getElementById("rhPhone")?.value?.trim() || "";
   const website = document.getElementById("rhWebsite")?.value?.trim() || "";
   const url = document.getElementById("rhProfileUrl")?.value?.trim() || "";
   let image = "";
   if (replaceHumanPendingImage) image = replaceHumanPendingImage;
   else if (/^https?:\/\//i.test(url) || String(url).startsWith("data:")) image = url;
+  if (!image && wasAlreadyHuman && String(mm.image || "").trim()) {
+    image = String(mm.image).trim();
+  }
   if (!image) image = uiAvatarFallbackSrc(name);
 
   if (replaceHumanSearchSessionExcluded.length) {
@@ -1083,6 +1134,7 @@ function applyReplaceHumanEditorSave() {
     phone,
     email,
     website,
+    emailPromptsToMember,
   };
   const g = gems.find((x) => Number(x.id) === Number(gid));
   if (g) {
@@ -1096,7 +1148,10 @@ function applyReplaceHumanEditorSave() {
   closeReplaceHumanEditor();
   renderGems();
   setSubmitState();
-  setStatus("This seat is now a human council member.", "success");
+  setStatus(
+    wasAlreadyHuman ? "Human council member profile updated." : "This seat is now a human council member.",
+    "success"
+  );
 }
 
 const COUNCIL_STOCK_PORTRAIT_MALE = [
@@ -1551,7 +1606,7 @@ function openResponsesOverlay(results, options = {}) {
     card.innerHTML = `
       <div class="response-overlay-card-header">
         <div class="response-overlay-card-meta">
-          <span class="response-overlay-card-name">${escapeHtml(name)}</span>
+          <span class="response-overlay-card-name">${escapeHtml(formatResponseCardMemberName(name, gFound))}</span>
           <span class="response-overlay-card-role">${escapeHtml(title)}</span>
         </div>
         <div class="response-overlay-card-avatar">${imgHtml}</div>
@@ -1604,10 +1659,12 @@ function openResponsesOverlay(results, options = {}) {
       const list = document.createElement("div");
       list.className = "response-overlay-followup-list";
       followUp.forEach((r) => {
+        const rGem = gems.find((g) => Number(g.id) === Number(r.gemId));
+        const followName = formatResponseCardMemberName(r.name, rGem);
         const fc = document.createElement("div");
         fc.className = "response-overlay-followup-item";
         fc.innerHTML = `
-          <strong>${escapeHtml(r.name)}</strong> ${r.jobTitle ? `<span class="response-overlay-followup-role">${escapeHtml(r.jobTitle)}</span>` : ""}
+          <strong>${escapeHtml(followName)}</strong> ${r.jobTitle ? `<span class="response-overlay-followup-role">${escapeHtml(r.jobTitle)}</span>` : ""}
           <p class="response-overlay-followup-text">${escapeHtml(r.response || "")}</p>
         `;
         list.appendChild(fc);
@@ -1629,15 +1686,16 @@ function renderResults(results, options = {}) {
     const card = document.createElement("div");
     card.className = "result-card";
     card.dataset.gemId = String(gemId);
+    const headerName = formatResponseCardMemberName(name, gFound);
     if (error) {
       card.innerHTML = `
-        <h3>${escapeHtml(name)}</h3>
+        <h3>${escapeHtml(headerName)}</h3>
         ${title ? `<p class="result-job-title">${escapeHtml(title)}</p>` : ""}
         <p class="response-error">${escapeHtml(error)}</p>
       `;
     } else {
       card.innerHTML = `
-        <h3>${escapeHtml(name)}</h3>
+        <h3>${escapeHtml(headerName)}</h3>
         ${title ? `<p class="result-job-title">${escapeHtml(title)}</p>` : ""}
         <p class="response-text">${responseToHtml(response || "")}</p>
       `;
@@ -1671,10 +1729,12 @@ function renderResults(results, options = {}) {
       const list = document.createElement("div");
       list.className = "results-list";
       followUp.forEach((r) => {
+        const rGem = gems.find((g) => Number(g.id) === Number(r.gemId));
+        const followName = formatResponseCardMemberName(r.name, rGem);
         const fc = document.createElement("div");
         fc.className = "result-card";
         fc.innerHTML = `
-          <h3>${escapeHtml(r.name)}</h3>
+          <h3>${escapeHtml(followName)}</h3>
           ${r.jobTitle ? `<p class="result-job-title">${escapeHtml(r.jobTitle)}</p>` : ""}
           <p class="response-text">${responseToHtml(r.response || "")}</p>
         `;
@@ -1719,12 +1779,12 @@ function saveCurrentChat() {
 function openSendToOverlay(source) {
   sendToSource = source;
   sendToSelectedIds = new Set();
-  const others = gems.filter((g) => g.id !== source.gemId && !g.isHuman);
+  const others = gems.filter((g) => Number(g.id) !== Number(source.gemId));
   sendToList.innerHTML = "";
   others.forEach((gem) => {
     const item = document.createElement("button");
     item.type = "button";
-    item.className = "send-to-item";
+    item.className = "send-to-item" + (gem.isHuman ? " send-to-item--human" : "");
     item.innerHTML = `
       <span><span class="send-to-name">${escapeHtml(gem.name)}</span><br><span class="send-to-job">${escapeHtml(gem.jobTitle || "")}</span></span>
     `;
@@ -1747,33 +1807,21 @@ function closeSendToOverlay() {
   sendToSource = null;
 }
 
-function confirmSendTo() {
-  if (!sendToSource || sendToSelectedIds.size === 0) {
-    closeSendToOverlay();
-    return;
-  }
-  const sourceGemId = sendToSource.gemId;
-  const prompt = sendToSource.response;
-  const selectedIdsForRequest = Array.from(sendToSelectedIds).filter((id) => {
-    const g = gems.find((x) => x.id === id);
-    return g && !g.isHuman;
-  });
-  if (selectedIdsForRequest.length === 0) {
-    closeSendToOverlay();
-    setStatus("Choose at least one AI member to respond.", "error");
-    return;
+function runOpinionRequestForSendTo(sourceGemId, prompt, aiIds) {
+  if (!aiIds.length) {
+    sendToConfirm.disabled = false;
+    return Promise.resolve();
   }
   sendToConfirm.disabled = true;
-  closeSendToOverlay();
   setStatus("");
   startCouncilLoading();
-  fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
+  return fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(
       chatPayload({
         prompt,
-        selectedGems: selectedIdsForRequest,
+        selectedGems: aiIds,
         opinionOnResponse: true,
       })
     ),
@@ -1782,7 +1830,9 @@ function confirmSendTo() {
     .then((data) => {
       if (!data.results) throw new Error(data.error || "No results");
       const jobTitleMap = {};
-      gems.forEach((g) => { jobTitleMap[g.name] = g.jobTitle; });
+      gems.forEach((g) => {
+        jobTitleMap[g.name] = g.jobTitle;
+      });
       const followUpsByGemId = {};
       const withTitles = data.results.map((r) => ({ ...r, jobTitle: jobTitleMap[r.name] || r.jobTitle }));
       followUpsByGemId[sourceGemId] = withTitles;
@@ -1802,9 +1852,120 @@ function confirmSendTo() {
     });
 }
 
+function openSendToHumanNoteStep() {
+  if (!pendingSendTo) return;
+  const names = formatEnglishNames(pendingSendTo.humanGems.map((g) => g.name));
+  const input = document.getElementById("sendToHumanNoteInput");
+  if (input) {
+    input.value = pendingSendTo.note || "";
+    input.placeholder = `Add a note for ${names} to introduce this email.`;
+  }
+  const el = document.getElementById("sendToHumanNoteOverlay");
+  if (el) el.hidden = false;
+}
+
+function closeSendToHumanNoteOverlay() {
+  const el = document.getElementById("sendToHumanNoteOverlay");
+  if (el) el.hidden = true;
+}
+
+function closeSendToHumanConfirmOverlay() {
+  const el = document.getElementById("sendToHumanConfirmOverlay");
+  if (el) el.hidden = true;
+}
+
+function abortSendToHumanFlow() {
+  closeSendToHumanNoteOverlay();
+  closeSendToHumanConfirmOverlay();
+  pendingSendTo = null;
+  if (sendToOverlay) sendToOverlay.hidden = false;
+}
+
+function confirmSendTo() {
+  if (!sendToSource || sendToSelectedIds.size === 0) {
+    closeSendToOverlay();
+    return;
+  }
+  const sourceGemId = sendToSource.gemId;
+  const prompt = sendToSource.response;
+  const selectedIds = Array.from(sendToSelectedIds);
+  const humanGems = [];
+  const aiIds = [];
+  for (const id of selectedIds) {
+    const g = gems.find((x) => Number(x.id) === Number(id));
+    if (!g) continue;
+    if (g.isHuman) humanGems.push(g);
+    else aiIds.push(id);
+  }
+  if (humanGems.length === 0 && aiIds.length === 0) {
+    closeSendToOverlay();
+    setStatus("Choose at least one member.", "error");
+    return;
+  }
+  if (humanGems.length > 0) {
+    pendingSendTo = {
+      sourceGemId,
+      prompt,
+      humanGems,
+      aiIds,
+      note: "",
+    };
+    sendToOverlay.hidden = true;
+    openSendToHumanNoteStep();
+    return;
+  }
+  sendToConfirm.disabled = true;
+  closeSendToOverlay();
+  runOpinionRequestForSendTo(sourceGemId, prompt, aiIds);
+}
+
+function onSendToHumanNoteNextClick() {
+  const input = document.getElementById("sendToHumanNoteInput");
+  if (pendingSendTo && input) pendingSendTo.note = input.value || "";
+  closeSendToHumanNoteOverlay();
+  const msg = document.getElementById("sendToHumanConfirmMessage");
+  if (msg && pendingSendTo) {
+    const who = formatEnglishNames(pendingSendTo.humanGems.map((g) => g.name));
+    msg.textContent = `Are you sure you want to send this email to ${who}? Make sure you have explained why you are sending it.`;
+  }
+  const el = document.getElementById("sendToHumanConfirmOverlay");
+  if (el) el.hidden = false;
+}
+
+function onSendToHumanConfirmBack() {
+  closeSendToHumanConfirmOverlay();
+  openSendToHumanNoteStep();
+}
+
+function finalizeSendToHumanEmailFlow() {
+  if (!pendingSendTo) return;
+  const { sourceGemId, prompt, humanGems, aiIds, note } = pendingSendTo;
+  const who = formatEnglishNames(humanGems.map((g) => g.name));
+  lastHumanEmailIntroNote = String(note || "").trim();
+  closeSendToHumanNoteOverlay();
+  closeSendToHumanConfirmOverlay();
+  pendingSendTo = null;
+  sendToSource = null;
+  if (sendToOverlay) sendToOverlay.hidden = true;
+  setStatus(
+    `Email to ${who} is not sent yet (delivery not connected). Your introductory note will be included when email is wired.`,
+    "success"
+  );
+  if (aiIds.length > 0) {
+    runOpinionRequestForSendTo(sourceGemId, prompt, aiIds);
+  }
+}
+
 sendToOverlayBackdrop.addEventListener("click", closeSendToOverlay);
 sendToCancel.addEventListener("click", closeSendToOverlay);
 sendToConfirm.addEventListener("click", confirmSendTo);
+
+document.getElementById("sendToHumanNoteBackdrop")?.addEventListener("click", abortSendToHumanFlow);
+document.getElementById("sendToHumanNoteCancel")?.addEventListener("click", abortSendToHumanFlow);
+document.getElementById("sendToHumanNoteNext")?.addEventListener("click", onSendToHumanNoteNextClick);
+document.getElementById("sendToHumanConfirmBackdrop")?.addEventListener("click", onSendToHumanConfirmBack);
+document.getElementById("sendToHumanConfirmBack")?.addEventListener("click", onSendToHumanConfirmBack);
+document.getElementById("sendToHumanConfirmSend")?.addEventListener("click", finalizeSendToHumanEmailFlow);
 
 if (responsesOverlayBackdrop) responsesOverlayBackdrop.addEventListener("click", closeResponsesOverlay);
 if (responsesOverlayClose) responsesOverlayClose.addEventListener("click", closeResponsesOverlay);
@@ -2164,6 +2325,24 @@ document.getElementById("rhProfileUrl")?.addEventListener("input", () => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  const stHumanConfirm = document.getElementById("sendToHumanConfirmOverlay");
+  const stHumanNote = document.getElementById("sendToHumanNoteOverlay");
+  const st = sendToOverlay;
+  if (stHumanConfirm && !stHumanConfirm.hidden) {
+    onSendToHumanConfirmBack();
+    e.preventDefault();
+    return;
+  }
+  if (stHumanNote && !stHumanNote.hidden) {
+    abortSendToHumanFlow();
+    e.preventDefault();
+    return;
+  }
+  if (st && !st.hidden) {
+    closeSendToOverlay();
+    e.preventDefault();
+    return;
+  }
   const rhEd = document.getElementById("replaceHumanEditorOverlay");
   const rhPre = document.getElementById("replaceHumanPreconfirmOverlay");
   const pre = document.getElementById("rubricPreconfirmOverlay");

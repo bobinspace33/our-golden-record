@@ -448,8 +448,18 @@ function expertDedupeKey(raw) {
 function normalizeMemberHumanFields(m) {
   if (!m) return;
   if (!Array.isArray(m.excludedLocalExperts)) m.excludedLocalExperts = [];
-  if (!m.humanContact) m.humanContact = { name: "", title: "", phone: "", email: "", website: "" };
+  if (!m.humanContact) {
+    m.humanContact = {
+      name: "",
+      title: "",
+      phone: "",
+      email: "",
+      website: "",
+      emailPromptsToMember: false,
+    };
+  }
   if (m.humanContact.organization === undefined) m.humanContact.organization = "";
+  if (m.humanContact.emailPromptsToMember === undefined) m.humanContact.emailPromptsToMember = false;
 }
 
 function getExcludeListForMember(idx) {
@@ -575,6 +585,7 @@ function applyExpertToMember(idx, data) {
     phone: "",
     email: "",
     website: "",
+    emailPromptsToMember: false,
   };
   closeLocalExpertModal();
   renderMemberCards();
@@ -642,7 +653,15 @@ function syncMemberCount() {
       portraitGender: null,
       phasesEnabled: state.phases.map(() => true),
       isHuman: false,
-      humanContact: { name: "", title: "", organization: "", phone: "", email: "", website: "" },
+      humanContact: {
+        name: "",
+        title: "",
+        organization: "",
+        phone: "",
+        email: "",
+        website: "",
+        emailPromptsToMember: false,
+      },
       localExpert: null,
       excludedLocalExperts: [],
     });
@@ -940,6 +959,7 @@ async function suggestMembers() {
           phone: "",
           email: "",
           website: "",
+          emailPromptsToMember: false,
         };
         state.members[i].portraitGender = effectivePortraitGender(row.portraitGender, row.name);
         state.members[i].phasesEnabled = coercePhasesEnabledFromApi(row.phasesEnabled, state.phases.length);
@@ -1003,6 +1023,7 @@ async function regenerateMember(idx) {
       phone: "",
       email: "",
       website: "",
+      emailPromptsToMember: false,
     };
     normalizeMemberPhaseArrays();
     state.members[idx].phasesEnabled = coercePhasesEnabledFromApi(data.phasesEnabled, state.phases.length);

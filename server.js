@@ -804,6 +804,236 @@ Reply with ONLY valid JSON:
   }
 });
 
+/** First https URL in contact text (matches client-side split heuristics). */
+function extractFirstHttpUrlFromContact(contact) {
+  const s = String(contact || "");
+  const m = s.match(/https?:\/\/[^\s\],)>'"<]+/i);
+  if (!m) return "";
+  return m[0].replace(/[.,;:)\]}>'"]+$/g, "");
+}
+
+function safeResolvePublicUrl(baseHref, href) {
+  if (!href || typeof href !== "string") return null;
+  let h = href.trim();
+  if (h.startsWith("//")) h = "https:" + h;
+  try {
+    const u = new URL(h, baseHref);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
+function scorePersonImageUrl(urlStr) {
+  const u = String(urlStr || "").toLowerCase();
+  let s = 0;
+  if (
+    /headshot|portrait|profile|\/people\/|\/person\/|\/staff\/|\/faculty\/|\/team\/|\/bio|\/directory\/|staff-photo|employee|\/profiles?\//.test(
+      u
+    )
+  ) {
+    s += 12;
+  }
+  if (/\.(jpe?g|png|webp)(\?|$)/i.test(u)) s += 2;
+  if (/\/uploads\/|\/media\/|wp-content\/uploads/i.test(u)) s += 1;
+  if (/logo|favicon|icon-|sprite|banner-hero|og-default|wordmark|brand-mark/.test(u)) s -= 8;
+  return s;
+}
+
+function scoreLogoImageUrl(urlStr) {
+  const u = String(urlStr || "").toLowerCase();
+  let s = 0;
+  if (/logo|brand|wordmark|favicon|apple-touch|\/icon|icons\/|mask-icon|crest|seal/.test(u)) s += 10;
+  if (/headshot|portrait|\/people\/|\/staff\/|\/faculty\/|\/team\/|directory/.test(u)) s -= 6;
+  if (/\.svg(\?|$)/i.test(u)) s += 3;
+  return s;
+}
+
+function normalizeLdImageValue(v) {
+  if (v == null) return [];
+  if (typeof v === "string") return [v];
+  if (Array.isArray(v)) return v.flatMap(normalizeLdImageValue);
+  if (typeof v === "object" && v.url) return normalizeLdImageValue(v.url);
+  return [];
+}
+
+function harvestJsonLdImages(node, acc) {
+  if (node == null) return;
+  if (Array.isArray(node)) {
+    node.forEach((n) => harvestJsonLdImages(n, acc));
+    return;
+  }
+  if (typeof node !== "object") return;
+
+  const types = node["@type"];
+  const tarr = Array.isArray(types) ? types : types ? [types] : [];
+  const typeJoined = tarr.map((t) => String(t)).join(" ");
+
+  const isPerson = /\bPerson\b/i.test(typeJoined);
+  const isOrg =
+    /\b(Organization|LocalBusiness|EducationalOrganization|CollegeOrUniversity|NGO|Museum|School|GovernmentOrganization|Corporation|Library|NewsMediaOrganization)\b/i.test(
+      typeJoined
+    );
+
+  if (isPerson) {
+    for (const u of normalizeLdImageValue(node.image)) {
+      if (typeof u === "string" && u.trim()) acc.person.push(u.trim());
+    }
+  }
+  if (isOrg && node.logo) {
+    for (const u of normalizeLdImageValue(node.logo)) {
+      if (typeof u === "string" && u.trim()) acc.logo.push(u.trim());
+    }
+  }
+
+  for (const k of Object.keys(node)) {
+    if (k === "@context") continue;
+    harvestJsonLdImages(node[k], acc);
+  }
+}
+
+function extractJsonLdImageLists(html) {
+  const acc = { person: [], logo: [] };
+  const re = /<script\s+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const raw = m[1].trim();
+    if (!raw) continue;
+    try {
+      harvestJsonLdImages(JSON.parse(raw), acc);
+    } catch {
+      /* ignore invalid JSON-LD */
+    }
+  }
+  return acc;
+}
+
+const OG_TWITTER_IMAGE_KEYS = new Set([
+  "og:image",
+  "og:image:url",
+  "og:image:secure_url",
+  "twitter:image",
+  "twitter:image:src",
+]);
+
+function extractOpenGraphAndTwitterImages(html) {
+  const found = [];
+  const re = /<meta\s+([^>]+)>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const attrs = m[1];
+    const prop = attrs.match(/\bproperty=["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    const name = attrs.match(/\bname=["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    const key = prop || name || "";
+    if (!OG_TWITTER_IMAGE_KEYS.has(key)) continue;
+    const content = attrs.match(/\bcontent=["']([^"']+)["']/i)?.[1];
+    if (!content) continue;
+    let c = content.trim();
+    if (c.startsWith("//")) c = "https:" + c;
+    if (/^https?:\/\//i.test(c)) found.push(c);
+  }
+  return [...new Set(found)];
+}
+
+function extractLinkIconsForLogo(html) {
+  const out = [];
+  const re = /<link\s+([^>]+)>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const attrs = m[1];
+    const rel = attrs.match(/\brel=["']([^"']+)["']/i)?.[1]?.toLowerCase() || "";
+    const href = attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    if (!href) continue;
+    if (/\b(?:apple-touch-icon|mask-icon|icon|shortcut\s+icon)\b/.test(rel)) {
+      out.push({ href, rel });
+    }
+  }
+  out.sort((a, b) => {
+    const rank = (r) => (/apple-touch/.test(r) ? 3 : /mask-icon/.test(r) ? 2 : /shortcut/.test(r) ? 1 : 0);
+    return rank(b.rel) - rank(a.rel);
+  });
+  return out;
+}
+
+function pickBestImageFromParsedPage(html, resolvedPageUrl) {
+  const ld = extractJsonLdImageLists(html);
+  const ogTw = extractOpenGraphAndTwitterImages(html);
+  const icons = extractLinkIconsForLogo(html);
+
+  const personRanked = [];
+  const logoRanked = [];
+
+  const pushPerson = (href, boost) => {
+    const abs = safeResolvePublicUrl(resolvedPageUrl, href);
+    if (!abs) return;
+    personRanked.push({ url: abs, s: boost + scorePersonImageUrl(abs) });
+  };
+  const pushLogo = (href, boost) => {
+    const abs = safeResolvePublicUrl(resolvedPageUrl, href);
+    if (!abs) return;
+    logoRanked.push({ url: abs, s: boost + scoreLogoImageUrl(abs) });
+  };
+
+  for (const u of ld.person) pushPerson(u, 95);
+  for (const u of ld.logo) pushLogo(u, 95);
+
+  for (const u of ogTw) {
+    const abs = safeResolvePublicUrl(resolvedPageUrl, u);
+    if (!abs) continue;
+    const ps = 10 + scorePersonImageUrl(abs);
+    const ls = 10 + scoreLogoImageUrl(abs);
+    if (ps >= ls) personRanked.push({ url: abs, s: ps });
+    else logoRanked.push({ url: abs, s: ls });
+  }
+
+  for (const { href } of icons) pushLogo(href, 32);
+
+  personRanked.sort((a, b) => b.s - a.s);
+  logoRanked.sort((a, b) => b.s - a.s);
+
+  const bestP = personRanked[0];
+  const bestL = logoRanked[0];
+  if (bestP && (!bestL || bestP.s >= bestL.s)) return bestP.url;
+  if (bestL) return bestL.url;
+  return "";
+}
+
+const WEBSITE_IMAGE_FETCH_MS = 12000;
+const MAX_HTML_FOR_IMAGES = 900_000;
+
+async function pickImageFromContactWebsite(contact) {
+  const pageUrl = extractFirstHttpUrlFromContact(contact);
+  if (!pageUrl) return "";
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), WEBSITE_IMAGE_FETCH_MS);
+  try {
+    const res = await fetch(pageUrl, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      },
+    });
+    if (!res.ok) return "";
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!/html|text\/plain|xml/.test(ct) && ct !== "") {
+      return "";
+    }
+    let html = await res.text();
+    if (html.length > MAX_HTML_FOR_IMAGES) html = html.slice(0, MAX_HTML_FOR_IMAGES);
+    const finalUrl = res.url || pageUrl;
+    return pickBestImageFromParsedPage(html, finalUrl);
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 app.post("/api/creator/local-expert", async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
@@ -843,7 +1073,7 @@ Context: ${projectSummary}
 Reply with ONLY valid JSON (no markdown):
 {"name":"string — full name or best available label","organization":"string — school, nonprofit, tribal office, museum, etc.","title":"string — role or program","contact":"string — phone, email, and/or website; say verify online if unsure","imageUrl":""}
 
-For imageUrl: use an empty string unless you are confident in a direct https URL to an official photo or logo image from that organization; do not invent URLs.`;
+For imageUrl: use an empty string unless you are confident in a direct https URL to an official photo or logo image from that organization; do not invent URLs. (The server may still derive an image from the website URL in contact when imageUrl is empty.)`;
   try {
     const text = await geminiGenerateText(ai, prompt);
     const parsed = parseJsonFromModelText(text);
@@ -851,12 +1081,23 @@ For imageUrl: use an empty string unless you are confident in a direct https URL
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(422).json({ error: "Could not parse expert.", raw: text.slice(0, 500) });
     }
+    let imageUrl = typeof parsed.imageUrl === "string" ? parsed.imageUrl.trim() : "";
+    if (!/^https?:\/\//i.test(imageUrl)) {
+      try {
+        const fromSite = await pickImageFromContactWebsite(
+          typeof parsed.contact === "string" ? parsed.contact.trim() : ""
+        );
+        if (fromSite) imageUrl = fromSite;
+      } catch {
+        /* keep empty / model value */
+      }
+    }
     res.json({
       name: name.trim(),
       organization: typeof parsed.organization === "string" ? parsed.organization.trim() : "",
       title: typeof parsed.title === "string" ? parsed.title.trim() : typeof parsed.subtitle === "string" ? parsed.subtitle.trim() : "",
       contact: typeof parsed.contact === "string" ? parsed.contact.trim() : "",
-      imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl.trim() : "",
+      imageUrl,
       regionHint: locationStr,
     });
   } catch (e) {

@@ -127,6 +127,36 @@
     </div>
   </div>
 
+  <div class="overlay" id="sendToHumanNoteOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="sendToHumanNoteTitle">
+    <div class="overlay-backdrop" id="sendToHumanNoteBackdrop"></div>
+    <div class="overlay-panel send-to-human-panel">
+      <h2 class="overlay-title" id="sendToHumanNoteTitle">Introductory note</h2>
+      <label class="send-to-human-note-label" for="sendToHumanNoteInput">Note</label>
+      <textarea
+        id="sendToHumanNoteInput"
+        class="send-to-human-note-input"
+        rows="4"
+        autocomplete="off"
+      ></textarea>
+      <div class="overlay-actions">
+        <button type="button" class="btn-secondary" id="sendToHumanNoteCancel">Cancel</button>
+        <button type="button" class="submit-btn" id="sendToHumanNoteNext">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="sendToHumanConfirmOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="sendToHumanConfirmTitle">
+    <div class="overlay-backdrop" id="sendToHumanConfirmBackdrop"></div>
+    <div class="overlay-panel send-to-human-panel">
+      <h2 class="overlay-title" id="sendToHumanConfirmTitle">Confirm email</h2>
+      <p class="overlay-body-text" id="sendToHumanConfirmMessage"></p>
+      <div class="overlay-actions">
+        <button type="button" class="btn-secondary" id="sendToHumanConfirmBack">Back</button>
+        <button type="button" class="submit-btn" id="sendToHumanConfirmSend">Send</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
