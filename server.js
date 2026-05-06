@@ -372,14 +372,52 @@ function extractOpenAiResponseText(response) {
   return parts.join("").trim();
 }
 
+/** Rotate follow-up “lanes” so parallel advisors don’t all suggest the same kind of place. */
+const COUNCIL_FOLLOW_UP_LANES = [
+  "Libraries, school media centers, or district literacy / STEM programs",
+  "Museums, cultural centers, historical societies, or heritage sites",
+  "University outreach, extension offices, college public programs, or campus-linked youth labs",
+  "Indigenous-led organizations, tribal programs, or culturally grounded community centers (only when fitting the topic)",
+  "Parks departments, nature centers, environmental nonprofits, or outdoor education groups",
+  "Youth nonprofits, makerspaces, civic innovation hubs, or hands-on community workshops",
+  "Local government youth services, public recreation, or municipal education / civic programs",
+];
+
+function orderCouncilPeersForLanes(peers) {
+  return [...(peers || [])].filter(Boolean).sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+function buildFollowUpCommunityInstruction(locationStr, orderedPeers, currentGem) {
+  const lanes = COUNCIL_FOLLOW_UP_LANES;
+  const idx = orderedPeers.findIndex((p) => p && Number(p.id) === Number(currentGem.id));
+  const safeIdx = idx >= 0 ? idx : 0;
+  const myLane = lanes[safeIdx % lanes.length];
+  const siblingLanes = new Set();
+  orderedPeers.forEach((p, i) => {
+    if (!p || Number(p.id) === Number(currentGem.id)) return;
+    siblingLanes.add(lanes[i % lanes.length]);
+  });
+  const othersText = siblingLanes.size
+    ? [...siblingLanes].join("; ")
+    : "none—you are the only AI advisor this round; still pick something specific to their region, not a vague generic site.";
+  return `\n\n[Follow up in your community — required]\nApproximate user location: ${locationStr}.\nEnd with a short section titled **Follow up in your community**.\n\nYour suggested resource must clearly fit **your assigned lane**: ${myLane}.\nPick ONE concrete kind of place or program that could exist near them. Other advisors answering in the same batch are steered toward **different** lanes—do not duplicate their usual outcome (their lanes include: ${othersText}).\n\nFormatting: full https:// URL when naming a website; add phone and email when you can find them; name a contact role when possible.\nIf you cannot verify a real institution, say so briefly and still describe the kind of local place to look for **within your lane**—not the same default another advisor would pick.\n`;
+}
+
 /**
  * Nudge models away from repeating sibling personas answering the same prompt.
  * @param {Array<{ id: unknown, name?: string, systemInstruction?: string }>} peers
  */
 function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn) {
   const cid = Number(currentId);
+  const self = peers.find((x) => x && Number(x.id) === cid);
   const others = peers.filter((x) => x && Number(x.id) !== cid);
-  if (!others.length) return "";
+  const selfName = typeof self?.name === "string" && self.name.trim() ? self.name.trim() : "Advisor";
+  const selfTitle = self ? jobTitleFn(self) || "Advisor" : "Advisor";
+
+  if (!others.length) {
+    return `\n\n[Council context]\nYou are **${selfName}** (${selfTitle}), the only advisor answering this round. Stay clearly inside that specialty: foreground checks, examples, and vocabulary that role would use first—not generic advice every subject could give.\nIf the question is outside your expertise, say so honestly (kid-friendly). Name another council role or a **type** of local expert who would know more, or suggest how an adult could help them find the right person.\n`;
+  }
+
   const lines = others.map((g) => {
     const jt = jobTitleFn(g) || "Advisor";
     const nm = typeof g.name === "string" && g.name.trim() ? g.name.trim() : "Advisor";
@@ -387,7 +425,8 @@ function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn) {
     const snippet = si.slice(0, 220);
     return `- ${nm} (${jt}): ${snippet}${si.length > 220 ? "…" : ""}`;
   });
-  return `\n\n[Council context — stay distinct]\nOther advisors who are also answering this same student message:\n${lines.join("\n")}\n\nAnswer only from YOUR role's lens. Avoid overlapping stock phrases, identical opening sentences, or the same "first step" another advisor would give. If topics collide, narrow to your specialty and foreground one concrete angle only you would stress.\n`;
+
+  return `\n\n[Council context — stay distinct]\nYou are **${selfName}**, ${selfTitle}. Answer only as this voice: prioritize lenses, examples, and caveats that fit **${selfTitle}** work—not a neutral essay.\n\nOther advisors answering the same student message:\n${lines.join("\n")}\n\nDifferentiation:\n- Use a different opening move and structure than generic council replies; avoid mirrored introductions.\n- Do not repeat the same “first step,” metaphor, or checklist another advisor would plausibly give.\n- If topics overlap, narrow harder into your specialty and lift **one** concrete angle only your role would stress.\n\nHonesty and referrals:\n- If you are unsure, say so plainly.\n- If the topic is mostly outside your specialty, say that openly. Point to another advisor **by name** (from the list above) whose lens fits better, or suggest a type of local professional or organization near the user.\n`;
 }
 
 async function openAiEnsureDocFileId(client, relativePath) {
@@ -427,7 +466,9 @@ Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas wit
 
 Safety and boundaries for minors: no sexual content; no instructions for weapons, drugs, self-harm, or illegal acts; no harassment or harsh insults. Do not encourage plagiarism or doing graded work for them—guide with prompts and scaffolds instead. Do not claim to know private facts about the student or their family.
 
-You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).`;
+You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).
+
+When several advisors answer the same student message in one round, each reply must be unmistakably different: varied framing, emphasis, and closing “follow up” suggestion—never copied templates or near-identical paragraphs across voices.`;
 
 async function openAiCompleteCouncilTurn(client, { instructions, userContentParts }) {
   const mergedInstructions = [OPEN_AI_CHAT_GLOBAL_EDUCATION_GUIDANCE, instructions].filter(Boolean).join("\n\n");
@@ -1858,19 +1899,17 @@ app.post("/api/chat/custom", async (req, res) => {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
 
-  let userPrompt = promptText || "(The user sent the following files with no additional text.)";
+  let coreUserPrompt = promptText || "(The user sent the following files with no additional text.)";
   let wordLimit = 260;
   if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
-    userPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${userPrompt}`;
+    coreUserPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${coreUserPrompt}`;
     wordLimit = 150;
   } else if (opinionOnResponse) {
-    userPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${userPrompt}`;
+    coreUserPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${coreUserPrompt}`;
     wordLimit = 200;
   }
 
   const locationStr = await getLocationFromRequest(req);
-  const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits, university departments with relevant experts, or non-profits. For the resource: (1) Always hyperlink the website—use a full URL (https://...) for any site you mention. (2) Include a phone number and email address when you can find them. (3) When possible, name a specific contact person. Keep this section concise.]`;
-  userPrompt = userPrompt + resourceInstruction;
 
   const projectContext = buildCustomCouncilContext(councilProject);
 
@@ -1887,6 +1926,8 @@ app.post("/api/chat/custom", async (req, res) => {
   const humanSelected = members.filter((m) => m && selectedSet.has(Number(m.id)) && m.isHuman);
 
   const results = [];
+
+  const orderedAiPeers = orderCouncilPeersForLanes(toRun);
 
   for (const hm of humanSelected) {
     const hc = hm.humanContact || {};
@@ -1913,14 +1954,19 @@ app.post("/api/chat/custom", async (req, res) => {
   await Promise.all(
     toRun.map(async (gem) => {
       try {
-        const userContentParts = [...attachmentContentParts, { type: "input_text", text: projectContext + "\n" + userPrompt }];
+        const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
+        const userContentParts = [
+          ...attachmentContentParts,
+          { type: "input_text", text: projectContext + "\n" + coreUserPrompt + followInstr },
+        ];
         const peerBlock = buildOpenAiPeerDifferentiationBlock(toRun, gem.id, (g) =>
           typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"
         );
+        const jt = typeof gem.jobTitle === "string" && gem.jobTitle.trim() ? gem.jobTitle.trim() : "Advisor";
         const instructions =
           (gem.systemInstruction || "") +
           peerBlock +
-          `\n\n${projectContext}\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
+          `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
         const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
         results.push({
           gemId: gem.id,
@@ -1962,22 +2008,21 @@ app.post("/api/chat", async (req, res) => {
   if (!promptText && !hasAttachments) {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
-  let userPrompt = promptText || "(The user sent the following files with no additional text.)";
+  let coreUserPrompt = promptText || "(The user sent the following files with no additional text.)";
   let wordLimit = 260;
   if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
-    userPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${userPrompt}`;
+    coreUserPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${coreUserPrompt}`;
     wordLimit = 150;
   } else if (opinionOnResponse) {
-    userPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${userPrompt}`;
+    coreUserPrompt = `Another council member wrote the following. Give your opinion from your own perspective. Include: (1) one thing you agree with, and (2) one critique, point of disagreement, or something you want to inquire further about. Keep your response to 200 words maximum.\n\n---\n\n${coreUserPrompt}`;
     wordLimit = 200;
   }
 
   const locationStr = await getLocationFromRequest(req);
-  const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits (e.g. Native American or indigenous culture), university departments with relevant experts, or non-profits. For the resource: (1) Always hyperlink the website—use a full URL (https://...) for any site you mention. (2) Include a phone number and email address when you can find them. (3) When possible, name a specific contact person (e.g. a department director, educator, or program coordinator) at a university department or museum. Include the resource name, working website URL, phone number if known, and email when possible. If you cannot name a specific institution, suggest the type of place to look and brief guidance. Keep this section concise.]`;
-  userPrompt = userPrompt + resourceInstruction;
 
   const results = [];
-  const gemConfigs = GEMS.filter((g) => selectedGems.includes(g.id));
+  const selectedSet = new Set((selectedGems || []).map((id) => Number(id)));
+  const gemConfigs = GEMS.filter((g) => selectedSet.has(Number(g.id)));
 
   const allDocPaths = new Set(gemConfigs.flatMap((g) => (Array.isArray(g.documents) ? g.documents : [])));
   const uploadedDocIds = new Map();
@@ -2000,9 +2045,12 @@ app.post("/api/chat", async (req, res) => {
     }
   }
 
+  const orderedAiPeers = orderCouncilPeersForLanes(gemConfigs);
+
   await Promise.all(
     gemConfigs.map(async (gem) => {
       try {
+        const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
         const userContentParts = [];
         const docPaths = Array.isArray(gem.documents) ? gem.documents : [];
         for (const rel of docPaths) {
@@ -2010,13 +2058,14 @@ app.post("/api/chat", async (req, res) => {
           if (fid) userContentParts.push({ type: "input_file", file_id: fid });
         }
         for (const p of attachmentContentParts) userContentParts.push(p);
-        userContentParts.push({ type: "input_text", text: userPrompt });
+        userContentParts.push({ type: "input_text", text: coreUserPrompt + followInstr });
 
         const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name);
+        const jt = JOB_TITLES[gem.name] || gem.name;
         const instructions =
           (gem.systemInstruction || "") +
           peerBlock +
-          `\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
+          `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
 
         const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
         results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
