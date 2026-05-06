@@ -22,6 +22,9 @@ function supportingEmbedLimits() {
 
 const MAX_SUPPORTING_FILES = 25;
 
+/** When teacher Pre-Launch Reflection gates navigation from the main Launch button */
+let pendingCouncilLaunchContext = null;
+
 /** Set to `true` after QC — enables “Build assessment rubrics on launch” and council rubric UI. */
 const RUBRIC_CREATION_ENABLED = false;
 
@@ -61,7 +64,11 @@ const state = {
     familyPortal: false,
     collaborationMode: false,
     buildRubricsOnLaunch: false,
+    teacherPreLaunchReflection: false,
   },
+  /** @type {{ source?: string, generatedAt?: string, projectTitleSnapshot?: string, sections?: Array<{ heading: string, questions: string[] }> } | null} */
+  preLaunchReflection: null,
+  preLaunchReflectionCacheKey: "",
   /** Embedded brief from a loaded draft when file input cannot be repopulated */
   draftBriefAttachment: null,
   /** @type {Array<{ phaseIndex: number, isFinal: boolean, phaseTitle: string, criteria: object[], studentTextFile: string }> | null} */
@@ -704,16 +711,29 @@ function renderObjectives() {
 function renderPhases() {
   const grid = document.getElementById("phasesGrid");
   if (!grid) return;
+  const canDelete = state.phases.length > 1;
   grid.innerHTML = state.phases
     .map(
       (p, i) => `
     <div class="phase-row">
       <span class="phase-num">${i + 1}</span>
+      <button type="button" class="phase-delete-btn" data-phase-delete="${i}" aria-label="Delete phase ${i + 1}" title="Delete this phase"${canDelete ? "" : " disabled"}>×</button>
       <input type="text" class="creator-input" data-phase-title="${i}" value="${escapeHtml(p.title)}" placeholder="Title" />
       <input type="text" class="creator-input" data-phase-desc="${i}" value="${escapeHtml(p.description)}" placeholder="Description / deliverable" />
     </div>`
     )
     .join("");
+  grid.querySelectorAll("[data-phase-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const i = Number(btn.dataset.phaseDelete);
+      if (!canDelete || !Number.isFinite(i)) return;
+      state.phases.splice(i, 1);
+      normalizeMemberPhaseArrays();
+      renderPhases();
+      renderMemberCards();
+      alignMemberPhaseAvailability().catch(() => {});
+    });
+  });
   grid.querySelectorAll("[data-phase-title]").forEach((inp) => {
     inp.addEventListener("input", () => {
       const i = Number(inp.dataset.phaseTitle);
@@ -882,6 +902,8 @@ async function suggestPhases() {
     "Analyzing your project…",
     "Reading your title, summary, and objectives to suggest aligned project phases."
   );
+  const phaseCount = objectives.length >= 1 ? Math.min(8, Math.max(1, objectives.length)) : 4;
+
   try {
     const res = await fetch("/api/creator/suggest-phases", {
       method: "POST",
@@ -891,6 +913,7 @@ async function suggestPhases() {
         projectSummary: summary,
         essentialQuestion: getEssentialQuestion(),
         objectives,
+        phaseCount,
       }),
     });
     const data = await res.json();
@@ -990,7 +1013,11 @@ async function regenerateMember(idx) {
   try {
     const otherMembers = state.members
       .filter((_, i) => i !== idx)
-      .map((m) => ({ name: m.name || "", jobTitle: m.jobTitle || "" }));
+      .map((m) => ({
+        name: m.name || "",
+        jobTitle: m.jobTitle || "",
+        coachingFocus: (m.systemInstruction || "").slice(0, 600),
+      }));
 
     const res = await fetch("/api/creator/regenerate-member", {
       method: "POST",
@@ -1053,6 +1080,10 @@ function renderSettings() {
     { key: "familyPortal", label: "Family summary emails (placeholder)" },
     { key: "collaborationMode", label: "Structured collaboration (placeholder)" },
     {
+      key: "teacherPreLaunchReflection",
+      label: "Teacher Pre-Launch Reflection (opens planning prompts before launch)",
+    },
+    {
       key: "buildRubricsOnLaunch",
       label:
         "Build assessment rubrics on launch",
@@ -1072,6 +1103,15 @@ function renderSettings() {
     cb.addEventListener("change", () => {
       if (cb.disabled) return;
       state.settings[cb.dataset.setting] = cb.checked;
+      if (cb.dataset.setting === "teacherPreLaunchReflection" && cb.checked) {
+        fetchPreLaunchReflection({ reason: "setting-enabled" }).catch((e) => {
+          const err = document.getElementById("creatorError");
+          if (err) {
+            err.textContent = e.message || String(e);
+            err.hidden = false;
+          }
+        });
+      }
     });
   });
 }
@@ -1289,6 +1329,8 @@ function collectDraftSnapshot() {
     })),
     rubrics: state.rubrics ? JSON.parse(JSON.stringify(state.rubrics)) : null,
     rubricsCacheKey: state.rubricsCacheKey || "",
+    preLaunchReflection: state.preLaunchReflection ? JSON.parse(JSON.stringify(state.preLaunchReflection)) : null,
+    preLaunchReflectionCacheKey: state.preLaunchReflectionCacheKey || "",
   };
 }
 
@@ -1324,6 +1366,7 @@ function applyDraftSnapshot(snapshot) {
     familyPortal: false,
     collaborationMode: false,
     buildRubricsOnLaunch: false,
+    teacherPreLaunchReflection: false,
     ...(snapshot.settings || {}),
   };
   if (!RUBRIC_CREATION_ENABLED) state.settings.buildRubricsOnLaunch = false;
@@ -1346,6 +1389,12 @@ function applyDraftSnapshot(snapshot) {
   }
   state.rubrics = Array.isArray(snapshot.rubrics) ? JSON.parse(JSON.stringify(snapshot.rubrics)) : null;
   state.rubricsCacheKey = typeof snapshot.rubricsCacheKey === "string" ? snapshot.rubricsCacheKey : "";
+  state.preLaunchReflection =
+    snapshot.preLaunchReflection && typeof snapshot.preLaunchReflection === "object"
+      ? JSON.parse(JSON.stringify(snapshot.preLaunchReflection))
+      : null;
+  state.preLaunchReflectionCacheKey =
+    typeof snapshot.preLaunchReflectionCacheKey === "string" ? snapshot.preLaunchReflectionCacheKey : "";
   state.draftBriefAttachment =
     snapshot.briefAttachment && snapshot.briefAttachment.data ? snapshot.briefAttachment : null;
 
@@ -1567,7 +1616,270 @@ async function analyzeBriefFile(file) {
   }
 }
 
-function launchCouncil() {
+function reflectionCacheKeyForPreLaunch() {
+  const title = document.getElementById("projectTitle")?.value?.trim() || "";
+  const summary = document.getElementById("projectSummary")?.value?.trim() || "";
+  const eq = getEssentialQuestion();
+  const objs = state.objectives.map((o) => o.trim()).filter(Boolean).join("|");
+  const docs = state.supportingDocuments.map((d) => `${d.name}:${d.size}`).join("|");
+  return `${title}:::${summary}:::${eq}:::${objs}:::${docs}`;
+}
+
+function fillPreLaunchModal(doc) {
+  const meta = document.getElementById("preLaunchMeta");
+  const body = document.getElementById("preLaunchBody");
+  const launchBtn = document.getElementById("preLaunchLaunchCouncilBtn");
+  const hint = document.getElementById("preLaunchLaunchHint");
+  if (meta) {
+    const srcLabel =
+      doc.source === "extracted"
+        ? "Prompts pulled from your uploads where matching sections were found."
+        : "Prompts adapted for your project using PBLWorks-style reflection pillars.";
+    const pt = doc.projectTitleSnapshot || document.getElementById("projectTitle")?.value?.trim() || "Project";
+    meta.textContent = `${pt} · ${srcLabel}`;
+  }
+  if (body && Array.isArray(doc.sections)) {
+    body.innerHTML = doc.sections
+      .map((sec) => {
+        const qs = (sec.questions || [])
+          .map((q) => `<li>${escapeHtml(q)}</li>`)
+          .join("");
+        return `<section class="prelaunch-section"><h3 class="prelaunch-heading">${escapeHtml(sec.heading)}</h3><ol class="prelaunch-questions">${qs}</ol></section>`;
+      })
+      .join("");
+  }
+  if (launchBtn) launchBtn.hidden = !pendingCouncilLaunchContext;
+  if (hint) hint.hidden = !pendingCouncilLaunchContext;
+}
+
+async function fetchPreLaunchReflection(opts = {}) {
+  const err = document.getElementById("creatorError");
+  if (err) err.hidden = true;
+  const title = document.getElementById("projectTitle")?.value?.trim() || "";
+  setCreatorLoading(
+    true,
+    "Preparing teacher reflection prompts…",
+    opts.reason === "setting-enabled"
+      ? "Checking your uploaded planning documents for PBLWorks-style prompts."
+      : "Aligning prompts to your project summary and objectives."
+  );
+  try {
+    const payloadDocs = state.supportingDocuments
+      .filter((d) => d.data)
+      .slice(0, 5)
+      .map((d) => ({ name: d.name, mimeType: d.mimeType, data: d.data }));
+    const res = await fetch("/api/creator/pre-launch-reflection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectTitle: title,
+        projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
+        essentialQuestion: getEssentialQuestion(),
+        objectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+        supportingAttachments: payloadDocs,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not build reflection prompts.");
+    state.preLaunchReflection = {
+      ...data,
+      projectTitleSnapshot: data.projectTitleSnapshot || title || "(Untitled project)",
+    };
+    state.preLaunchReflectionCacheKey = reflectionCacheKeyForPreLaunch();
+    fillPreLaunchModal(state.preLaunchReflection);
+    const modal = document.getElementById("preLaunchModal");
+    if (modal) modal.hidden = false;
+  } catch (e) {
+    if (err) {
+      err.textContent = e.message || String(e);
+      err.hidden = false;
+    }
+    throw e;
+  } finally {
+    setCreatorLoading(false);
+  }
+}
+
+function closePreLaunchModal() {
+  const ov = document.getElementById("preLaunchModal");
+  if (ov) ov.hidden = true;
+}
+
+function openTeacherMenuModal() {
+  const ov = document.getElementById("teacherMenuModal");
+  if (ov) ov.hidden = false;
+}
+
+function closeTeacherMenuModal() {
+  const ov = document.getElementById("teacherMenuModal");
+  if (ov) ov.hidden = true;
+}
+
+async function openTeacherMenuPreLaunch() {
+  closeTeacherMenuModal();
+  const key = reflectionCacheKeyForPreLaunch();
+  try {
+    if (!state.preLaunchReflection || state.preLaunchReflectionCacheKey !== key) {
+      pendingCouncilLaunchContext = null;
+      await fetchPreLaunchReflection({ reason: "teacher-menu" });
+    } else {
+      fillPreLaunchModal(state.preLaunchReflection);
+      document.getElementById("preLaunchModal").hidden = false;
+    }
+  } catch {
+    /* surfaced elsewhere */
+  }
+}
+
+function downloadPreLaunchReflectionPdf() {
+  const data = state.preLaunchReflection;
+  const err = document.getElementById("creatorError");
+  if (!data?.sections?.length) return;
+  const JsPdfCtor = window.jspdf?.jsPDF;
+  if (typeof JsPdfCtor !== "function") {
+    if (err) {
+      err.textContent = "PDF library did not load. Check your connection and refresh the page.";
+      err.hidden = false;
+    }
+    return;
+  }
+  const doc = new JsPdfCtor({ unit: "pt", format: "letter" });
+  const margin = 52;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const maxW = pageW - margin * 2;
+  let y = margin;
+  const lineStep = 14;
+  const titleStr = data.projectTitleSnapshot || "Teacher Pre-Launch Reflection";
+
+  function ensureSpace(h) {
+    if (y + h > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  }
+
+  doc.setFontSize(18);
+  doc.setFont(undefined, "bold");
+  ensureSpace(24);
+  doc.text("Teacher Pre-Launch Reflection", margin, y);
+  y += 28;
+
+  doc.setFontSize(11);
+  doc.setFont(undefined, "normal");
+  const metaLines = doc.splitTextToSize(titleStr, maxW);
+  metaLines.forEach((ln) => {
+    ensureSpace(lineStep);
+    doc.text(ln, margin, y);
+    y += lineStep;
+  });
+  y += 12;
+
+  for (const sec of data.sections) {
+    doc.setFontSize(13);
+    doc.setFont(undefined, "bold");
+    const headLines = doc.splitTextToSize(sec.heading || "", maxW);
+    headLines.forEach((ln) => {
+      ensureSpace(lineStep + 2);
+      doc.text(ln, margin, y);
+      y += lineStep + 2;
+    });
+    y += 6;
+    doc.setFontSize(10);
+    doc.setFont(undefined, "normal");
+    const qs = Array.isArray(sec.questions) ? sec.questions : [];
+    qs.forEach((q, qi) => {
+      const bullet = `${qi + 1}. ${String(q || "").trim()}`;
+      const wrapped = doc.splitTextToSize(bullet, maxW - 14);
+      wrapped.forEach((ln, li) => {
+        ensureSpace(lineStep);
+        doc.text(ln, margin + (li === 0 ? 0 : 12), y);
+        y += lineStep;
+      });
+      y += 4;
+    });
+    y += 10;
+  }
+
+  const safeName = (titleStr || "reflection").replace(/[^\w\-]+/g, "_").slice(0, 80);
+  doc.save(`${safeName}_pre_launch_reflection.pdf`);
+}
+
+async function runCouncilLaunchPipeline(id, title, err) {
+  setCreatorLoading(
+    true,
+    "Preparing your council…",
+    state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED
+      ? "Building rubrics, reading your project brief (if any), and saving before opening."
+      : "Reading your project brief (if uploaded) and saving your council before opening."
+  );
+  try {
+    const brief = await resolveBriefForLaunch();
+    if (state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED) {
+      setCreatorLoading(
+        true,
+        "Building assessment rubrics…",
+        "Creating criteria for each phase (Beginning → Demonstrating)."
+      );
+      await fetchRubricSpecsFromForm();
+    }
+
+    const config = {
+      projectTitle: title,
+      projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
+      essentialQuestion: document.getElementById("essentialQuestion")?.value?.trim() || "",
+      learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
+      phases: state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim()),
+      members: state.members.map((m) => ({ ...m })),
+      settings: { ...state.settings },
+      briefAttachment: null,
+      supportingAttachments: state.supportingDocuments
+        .filter((d) => d.data)
+        .map((d) => ({ name: d.name, mimeType: d.mimeType, data: d.data })),
+      rubrics: state.rubrics ? JSON.parse(JSON.stringify(state.rubrics)) : null,
+      rubricsCacheKey: state.rubricsCacheKey || "",
+      preLaunchReflection: state.preLaunchReflection ? JSON.parse(JSON.stringify(state.preLaunchReflection)) : null,
+    };
+    if (brief?.data) config.briefAttachment = brief;
+    try {
+      sessionStorage.setItem("aiCouncilActiveProject", JSON.stringify(config));
+    } catch (e) {
+      err.textContent = "Could not save council data (storage may be full).";
+      err.hidden = false;
+      return;
+    }
+
+    let list = [];
+    try {
+      list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    } catch {
+      list = [];
+    }
+    list = list.filter((x) => x.id !== id);
+    list.unshift({
+      id,
+      title,
+      description: config.phases[0]?.title || "Custom council",
+      config,
+      updatedAt: new Date().toISOString(),
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, 20)));
+
+    if (currentDraftId) {
+      removeDraftById(currentDraftId);
+      currentDraftId = null;
+    }
+
+    window.location.href = `/council.html?saved=${encodeURIComponent(id)}`;
+  } catch (e) {
+    err.textContent = e?.message || String(e);
+    err.hidden = false;
+  } finally {
+    setCreatorLoading(false);
+  }
+}
+
+async function launchCouncil() {
   const err = document.getElementById("creatorError");
   err.hidden = true;
   const title = document.getElementById("projectTitle")?.value?.trim();
@@ -1594,82 +1906,32 @@ function launchCouncil() {
       ? crypto.randomUUID()
       : `council-${Date.now()}`;
 
-  setCreatorLoading(
-    true,
-    "Preparing your council…",
-    state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED
-      ? "Building rubrics, reading your project brief (if any), and saving before opening."
-      : "Reading your project brief (if uploaded) and saving your council before opening."
-  );
-  resolveBriefForLaunch()
-    .then(async (brief) => {
-      if (state.settings.buildRubricsOnLaunch && RUBRIC_CREATION_ENABLED) {
-        setCreatorLoading(
-          true,
-          "Building assessment rubrics…",
-          "Creating criteria for each phase (Beginning → Demonstrating)."
-        );
-        try {
-          await fetchRubricSpecsFromForm();
-        } catch (e) {
-          err.textContent = e.message || String(e);
-          err.hidden = false;
-          return;
-        }
-      }
-
-      const config = {
-        projectTitle: title,
-        projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
-        essentialQuestion: document.getElementById("essentialQuestion")?.value?.trim() || "",
-        learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
-        phases: state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim()),
-        members: state.members.map((m) => ({ ...m })),
-        settings: { ...state.settings },
-        briefAttachment: null,
-        supportingAttachments: state.supportingDocuments
-          .filter((d) => d.data)
-          .map((d) => ({ name: d.name, mimeType: d.mimeType, data: d.data })),
-        rubrics: state.rubrics ? JSON.parse(JSON.stringify(state.rubrics)) : null,
-        rubricsCacheKey: state.rubricsCacheKey || "",
-      };
-      if (brief?.data) config.briefAttachment = brief;
+  if (state.settings.teacherPreLaunchReflection) {
+    const key = reflectionCacheKeyForPreLaunch();
+    const stale = !state.preLaunchReflection || state.preLaunchReflectionCacheKey !== key;
+    if (stale) {
+      pendingCouncilLaunchContext = { id, title };
       try {
-        sessionStorage.setItem("aiCouncilActiveProject", JSON.stringify(config));
-      } catch (e) {
-        err.textContent = "Could not save council data (storage may be full).";
-        err.hidden = false;
+        await fetchPreLaunchReflection({ reason: "launch-gate" });
+      } catch {
+        pendingCouncilLaunchContext = null;
         return;
       }
+      return;
+    }
+  }
 
-      let list = [];
-      try {
-        list = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      } catch {
-        list = [];
-      }
-      list = list.filter((x) => x.id !== id);
-      list.unshift({
-        id,
-        title,
-        description: config.phases[0]?.title || "Custom council",
-        config,
-        updatedAt: new Date().toISOString(),
-      });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, 20)));
+  pendingCouncilLaunchContext = null;
+  await runCouncilLaunchPipeline(id, title, err);
+}
 
-      if (currentDraftId) {
-        removeDraftById(currentDraftId);
-        currentDraftId = null;
-      }
-
-      window.location.href = `/council.html?saved=${encodeURIComponent(id)}`;
-    })
-    .catch((e) => {
-      err.textContent = e?.message || String(e);
-      err.hidden = false;
-    })
-    .finally(() => setCreatorLoading(false));
+async function continueCouncilLaunchAfterReflection() {
+  const pending = pendingCouncilLaunchContext;
+  const err = document.getElementById("creatorError");
+  closePreLaunchModal();
+  pendingCouncilLaunchContext = null;
+  if (!pending?.title || !pending?.id) return;
+  await runCouncilLaunchPipeline(pending.id, pending.title, err);
 }
 
 document.getElementById("addObjectiveBtn")?.addEventListener("click", () => {
@@ -1688,7 +1950,40 @@ document.getElementById("suggestMembersBtn")?.addEventListener("click", suggestM
 document.getElementById("memberCount")?.addEventListener("change", () => {
   syncMemberCount();
 });
-document.getElementById("launchCouncilBtn")?.addEventListener("click", launchCouncil);
+document.getElementById("launchCouncilBtn")?.addEventListener("click", () => {
+  launchCouncil().catch((e) => {
+    const err = document.getElementById("creatorError");
+    if (err) {
+      err.textContent = e.message || String(e);
+      err.hidden = false;
+    }
+  });
+});
+
+document.getElementById("teacherMenuBtn")?.addEventListener("click", () => openTeacherMenuModal());
+document.getElementById("teacherMenuModal")?.addEventListener("click", (e) => {
+  if (e.target.closest("[data-close-tm]")) closeTeacherMenuModal();
+});
+document.getElementById("teacherMenuPreLaunchBtn")?.addEventListener("click", () => {
+  openTeacherMenuPreLaunch().catch(() => {});
+});
+
+document.getElementById("preLaunchModal")?.addEventListener("click", (e) => {
+  if (e.target.closest("[data-close-pl]")) {
+    closePreLaunchModal();
+    pendingCouncilLaunchContext = null;
+  }
+});
+document.getElementById("preLaunchDownloadPdf")?.addEventListener("click", () => downloadPreLaunchReflectionPdf());
+document.getElementById("preLaunchLaunchCouncilBtn")?.addEventListener("click", () => {
+  continueCouncilLaunchAfterReflection().catch((e) => {
+    const err = document.getElementById("creatorError");
+    if (err) {
+      err.textContent = e.message || String(e);
+      err.hidden = false;
+    }
+  });
+});
 
 document.getElementById("lemYes")?.addEventListener("click", () => {
   const idx = localExpertModal.memberIdx;
@@ -1702,9 +1997,22 @@ document.getElementById("localExpertModal")?.addEventListener("click", (e) => {
   if (e.target.closest("[data-close-lem]")) closeLocalExpertModal();
 });
 document.addEventListener("keydown", (e) => {
-  const modal = document.getElementById("localExpertModal");
-  if (e.key !== "Escape" || !modal || modal.hidden) return;
-  closeLocalExpertModal();
+  if (e.key !== "Escape") return;
+  const lem = document.getElementById("localExpertModal");
+  if (lem && !lem.hidden) {
+    closeLocalExpertModal();
+    return;
+  }
+  const tm = document.getElementById("teacherMenuModal");
+  if (tm && !tm.hidden) {
+    closeTeacherMenuModal();
+    return;
+  }
+  const pl = document.getElementById("preLaunchModal");
+  if (pl && !pl.hidden) {
+    closePreLaunchModal();
+    pendingCouncilLaunchContext = null;
+  }
 });
 document.getElementById("saveDraftBtn")?.addEventListener("click", () => {
   saveCouncilDraft().catch((e) => {

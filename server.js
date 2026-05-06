@@ -4,10 +4,13 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
-import { GoogleGenAI, createUserContent, createPartFromUri, createPartFromBase64 } from "@google/genai";
+import { GoogleGenAI, createUserContent, createPartFromBase64 } from "@google/genai";
+import OpenAI from "openai";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
+/** Shipped PBLWorks-style exemplar brief PDFs (`public/project briefs/`) — style reference for pre-launch reflection prompts. */
+const PBLWORKS_EXEMPLAR_BRIEFS_DIR = path.join(PUBLIC_DIR, "project briefs");
 
 const app = express();
 app.use(cors());
@@ -63,6 +66,9 @@ app.get("/api/debug", (req, res) => {
 });
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+/** Council chat (`/api/chat`, `/api/chat/custom`) uses OpenAI Responses API. */
+const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || "gpt-5.2").trim();
 const PORT = process.env.PORT || 3000;
 
 /** Gemini native image ("Nano Banana") — see https://ai.google.dev/gemini-api/docs/image-generation */
@@ -103,8 +109,7 @@ const GEMINI_CREATOR_MODEL_CHAIN = dedupeModelChain(
 );
 
 /**
- * Comma-separated model ids for /api/chat and /api/chat/custom (council messages).
- * Defaults to creator chain. First candidate is each member's configured model, then these (deduped).
+ * Legacy/fallback: comma-separated Gemini model ids referenced only outside council chat (unused there once OpenAI is wired).
  * Example: GEMINI_CHAT_MODEL_CHAIN=gemini-2.0-flash,gemini-2.5-flash-lite
  */
 const GEMINI_CHAT_MODEL_CHAIN = dedupeModelChain(
@@ -196,6 +201,44 @@ const MIME_BY_EXT = {
 // Gemini Files API supports PDF, text, markdown, CSV, HTML only. DOCX is not supported.
 const SUPPORTED_DOC_EXTENSIONS = new Set([".pdf", ".txt", ".md", ".csv", ".html"]);
 
+/** PBLWorks-style teacher pre-launch reflection headings (exact canonical titles). */
+const PRE_LAUNCH_HEADINGS_ORDER = [
+  "Reflect on your students",
+  "Reflect on your context",
+  "Reflect on your content & skills",
+];
+
+/** Default prompts when uploads lack reflection sections—structured like PBLWorks teacher prep pillars (original wording). */
+const PRE_LAUNCH_FALLBACK_SECTIONS = [
+  {
+    heading: "Reflect on your students",
+    questions: [
+      "What strengths do your students already bring that this project can build on?",
+      "Where might students need extra support—in reading dense texts, collaborating in teams, presenting work, or managing longer timelines?",
+      "How will you make space for different identities and communication styles so every learner can contribute?",
+      "What formative checks will tell you students are ready before high-stakes milestones?",
+    ],
+  },
+  {
+    heading: "Reflect on your context",
+    questions: [
+      "What real-world audiences or partners could make feedback authentic—and how will you coordinate logistics?",
+      "What constraints shape your schedule, materials, and tech—and where do those constraints become creative boundaries?",
+      "What assumptions about your school community might students need to question during inquiry?",
+      "How will you invite caregivers or community voices without overburdening families?",
+    ],
+  },
+  {
+    heading: "Reflect on your content & skills",
+    questions: [
+      "Which standards or competencies should remain visible from launch day through the final exhibition?",
+      "What content misconceptions typically trip students up—and how does inquiry surface them safely?",
+      "How does your essential question connect daily lessons to a culminating product students care about?",
+      "Which disciplinary practices (argument from evidence, modeling, critique/revision) will students rehearse repeatedly?",
+    ],
+  },
+];
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // LINKING YOUR EXISTING 5 GEMS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -281,6 +324,121 @@ async function uploadDocForGem(ai, relativePath) {
   const out = { uri: uploaded.uri ?? uploaded.name, mimeType: uploaded.mimeType ?? mimeType };
   fileUriCache.set(cacheKey, out);
   return out;
+}
+
+/** Cache OpenAI file ids per document path + revision (mtime/size). */
+const openAiDocFileIdCache = new Map();
+
+function getOpenAIClient() {
+  const k = OPENAI_API_KEY && String(OPENAI_API_KEY).trim();
+  if (!k) return null;
+  return new OpenAI({ apiKey: k });
+}
+
+function openAiBrowserAttachmentToContentPart(a) {
+  if (!a || typeof a.data !== "string" || !a.mimeType) return null;
+  const mime = String(a.mimeType).toLowerCase();
+  const data = a.data;
+  if (mime.startsWith("image/")) {
+    return { type: "input_image", image_url: `data:${mime};base64,${data}` };
+  }
+  const ext =
+    mime === "application/pdf"
+      ? "pdf"
+      : mime.includes("csv")
+        ? "csv"
+        : mime.includes("markdown") || mime === "text/markdown"
+          ? "md"
+          : mime.includes("html")
+            ? "html"
+            : "txt";
+  return {
+    type: "input_file",
+    filename: `attachment.${ext}`,
+    file_data: `data:${mime};base64,${data}`,
+  };
+}
+
+function extractOpenAiResponseText(response) {
+  const direct = response?.output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const parts = [];
+  for (const item of response?.output || []) {
+    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
+    for (const c of item.content) {
+      if (typeof c?.text === "string") parts.push(c.text);
+    }
+  }
+  return parts.join("").trim();
+}
+
+/**
+ * Nudge models away from repeating sibling personas answering the same prompt.
+ * @param {Array<{ id: unknown, name?: string, systemInstruction?: string }>} peers
+ */
+function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn) {
+  const cid = Number(currentId);
+  const others = peers.filter((x) => x && Number(x.id) !== cid);
+  if (!others.length) return "";
+  const lines = others.map((g) => {
+    const jt = jobTitleFn(g) || "Advisor";
+    const nm = typeof g.name === "string" && g.name.trim() ? g.name.trim() : "Advisor";
+    const si = typeof g.systemInstruction === "string" ? g.systemInstruction.replace(/\s+/g, " ").trim() : "";
+    const snippet = si.slice(0, 220);
+    return `- ${nm} (${jt}): ${snippet}${si.length > 220 ? "…" : ""}`;
+  });
+  return `\n\n[Council context — stay distinct]\nOther advisors who are also answering this same student message:\n${lines.join("\n")}\n\nAnswer only from YOUR role's lens. Avoid overlapping stock phrases, identical opening sentences, or the same "first step" another advisor would give. If topics collide, narrow to your specialty and foreground one concrete angle only you would stress.\n`;
+}
+
+async function openAiEnsureDocFileId(client, relativePath) {
+  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\))+/, "");
+  const absPath = path.join(DOCUMENTS_DIR, normalized);
+  const ext = path.extname(absPath).toLowerCase();
+  if (!SUPPORTED_DOC_EXTENSIONS.has(ext)) return null;
+  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
+    console.warn(`OpenAI doc skip (missing): ${relativePath}`);
+    return null;
+  }
+  const st = fs.statSync(absPath);
+  const cacheKey = `${absPath}:${st.size}:${st.mtimeMs}`;
+  const existing = openAiDocFileIdCache.get(cacheKey);
+  if (existing) return existing;
+  const pending = client.files
+    .create({ file: fs.createReadStream(absPath), purpose: "user_data" })
+    .then((f) => f.id)
+    .catch((e) => {
+      openAiDocFileIdCache.delete(cacheKey);
+      throw e;
+    });
+  openAiDocFileIdCache.set(cacheKey, pending);
+  return pending;
+}
+
+/**
+ * Prepended to every OpenAI council completion. Educational context + fixed child-aware audience.
+ * Single choke point for `/api/chat` and `/api/chat/custom`.
+ */
+const OPEN_AI_CHAT_GLOBAL_EDUCATION_GUIDANCE = `[Educational product — global rules for every reply]
+You are part of an AI council inside a **school project-based learning (PBL) tool**. Every answer must support teaching and learning in a classroom setting.
+
+Audience (non-negotiable): **You are talking to a sixth-grade student** (about ages 11–12). Write as if speaking directly to them: clear everyday vocabulary, short sentences when possible, concrete examples, and zero condescension. Do not assume adult life experience; explain specialized terms briefly when you must use them.
+
+Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas with questions, never shame the learner. Stay on-topic for the student’s project question.
+
+Safety and boundaries for minors: no sexual content; no instructions for weapons, drugs, self-harm, or illegal acts; no harassment or harsh insults. Do not encourage plagiarism or doing graded work for them—guide with prompts and scaffolds instead. Do not claim to know private facts about the student or their family.
+
+You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).`;
+
+async function openAiCompleteCouncilTurn(client, { instructions, userContentParts }) {
+  const mergedInstructions = [OPEN_AI_CHAT_GLOBAL_EDUCATION_GUIDANCE, instructions].filter(Boolean).join("\n\n");
+  const response = await client.responses.create({
+    model: OPENAI_CHAT_MODEL,
+    instructions: mergedInstructions || undefined,
+    input: [{ role: "user", content: userContentParts }],
+  });
+  const text = extractOpenAiResponseText(response);
+  if (!text.trim()) throw new Error("OpenAI returned no text.");
+  return text;
 }
 
 const JOB_TITLES = {
@@ -548,6 +706,8 @@ app.get("/api/creator/health", (req, res) => {
   res.json({
     ok: true,
     hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
+    hasOpenAiKey: Boolean(OPENAI_API_KEY && String(OPENAI_API_KEY).trim()),
+    openAiChatModel: OPENAI_CHAT_MODEL,
     creatorModelChain: GEMINI_CREATOR_MODEL_CHAIN,
     chatModelChain: GEMINI_CHAT_MODEL_CHAIN,
     vercel: Boolean(process.env.VERCEL),
@@ -559,14 +719,25 @@ app.post("/api/creator/suggest-phases", async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
   }
-  const { projectTitle = "", projectSummary = "", essentialQuestion = "", objectives = [] } = req.body || {};
+  const { projectTitle = "", projectSummary = "", essentialQuestion = "", objectives = [], phaseCount: phaseCountRaw } =
+    req.body || {};
+  const objClean = Array.isArray(objectives)
+    ? objectives.map((o) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+  const parsed = Number(phaseCountRaw);
+  let phaseCount =
+    Number.isFinite(parsed) && parsed >= 1 && parsed <= 8 ? Math.floor(parsed) : null;
+  if (phaseCount == null) {
+    phaseCount = objClean.length >= 1 ? Math.min(8, Math.max(1, objClean.length)) : 4;
+  }
+
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const prompt = `You help teachers design PBL project phases. Based on the following, propose 3–5 sequential project phases. Each phase needs a short title and a one-line description/deliverable.
+  const prompt = `You help teachers design PBL project phases. Based on the following, propose exactly **${phaseCount}** sequential project phases—no more, no fewer. Each phase needs a short title and a one-line description/deliverable.
 
 Project title: ${projectTitle}
 Essential question (if any): ${essentialQuestion || "(not specified)"}
 Summary / brief excerpt: ${projectSummary}
-Learning objectives (list): ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+Learning objectives (list): ${objClean.join("; ") || "(not specified)"}
 
 Reply with ONLY valid JSON (no markdown):
 {"phases":[{"title":"string","description":"string"}]}`;
@@ -576,7 +747,226 @@ Reply with ONLY valid JSON (no markdown):
     if (!parsed?.phases || !Array.isArray(parsed.phases)) {
       return res.status(422).json({ error: "Could not parse phases.", raw: text.slice(0, 500) });
     }
-    res.json({ phases: parsed.phases });
+    const phases = parsed.phases.slice(0, phaseCount);
+    while (phases.length < phaseCount) {
+      phases.push({ title: "", description: "" });
+    }
+    res.json({ phases });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || String(e) });
+  }
+});
+
+function normalizePreLaunchGeminiSections(parsed) {
+  const rawSections = Array.isArray(parsed?.sections) ? parsed.sections : [];
+  const byNorm = new Map();
+  for (const s of rawSections) {
+    const hRaw = String(s?.heading || "").trim().replace(/\s+/g, " ");
+    const canon =
+      PRE_LAUNCH_HEADINGS_ORDER.find((c) => c.toLowerCase() === hRaw.toLowerCase()) ||
+      PRE_LAUNCH_HEADINGS_ORDER.find((c) => hRaw.toLowerCase().includes(c.toLowerCase().slice(0, 22)));
+    if (!canon) continue;
+    const qs = Array.isArray(s?.questions)
+      ? s.questions.map((q) => String(q || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+      : [];
+    byNorm.set(canon, qs);
+  }
+
+  let extractedStrong = 0;
+  const sections = PRE_LAUNCH_HEADINGS_ORDER.map((heading) => {
+    const extracted = byNorm.get(heading) || [];
+    const fb = PRE_LAUNCH_FALLBACK_SECTIONS.find((f) => f.heading === heading)?.questions || [];
+    const questions = extracted.length >= 2 ? extracted.slice(0, 15) : fb.slice();
+    if (extracted.length >= 2) extractedStrong += 1;
+    return { heading, questions };
+  });
+
+  const source =
+    String(parsed?.source || "").toLowerCase() === "extracted" && extractedStrong >= 2 ? "extracted" : "adapted";
+  return { source, sections };
+}
+
+const PRE_LAUNCH_EXEMPLAR_MAX_FILES = Math.min(
+  8,
+  Math.max(1, Number(process.env.PRE_LAUNCH_EXEMPLAR_MAX_FILES) || 3)
+);
+const PRE_LAUNCH_EXEMPLAR_MAX_BYTES_EACH =
+  Number(process.env.PRE_LAUNCH_EXEMPLAR_MAX_BYTES_EACH) >= 400000
+    ? Math.floor(Number(process.env.PRE_LAUNCH_EXEMPLAR_MAX_BYTES_EACH))
+    : 10 * 1024 * 1024;
+
+function listPblWorksExemplarBriefPaths() {
+  if (!fs.existsSync(PBLWORKS_EXEMPLAR_BRIEFS_DIR)) return [];
+  let names = [];
+  try {
+    names = fs.readdirSync(PBLWORKS_EXEMPLAR_BRIEFS_DIR);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const n of names) {
+    if (!n || n.startsWith(".")) continue;
+    if (!/\.pdf$/i.test(n)) continue;
+    const abs = path.join(PBLWORKS_EXEMPLAR_BRIEFS_DIR, n);
+    try {
+      if (fs.statSync(abs).isFile()) out.push(abs);
+    } catch {
+      /* skip */
+    }
+  }
+  return out.sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+}
+
+function pickPblWorksExemplarBriefPaths(seedStr, maxCount) {
+  const all = listPblWorksExemplarBriefPaths();
+  if (!all.length || maxCount < 1) return [];
+  let h = 2166136261;
+  const s = String(seedStr || "seed");
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  const start = Math.abs(h >>> 0) % all.length;
+  const picked = [];
+  for (let k = 0; k < maxCount; k++) picked.push(all[(start + k * 3) % all.length]);
+  return [...new Set(picked)];
+}
+
+/** Gemini multimodal parts for shipped exemplar briefs (style reference only). */
+function loadPblWorksExemplarGeminiParts(seedStr) {
+  const pickedAbs = pickPblWorksExemplarBriefPaths(seedStr, PRE_LAUNCH_EXEMPLAR_MAX_FILES);
+  const parts = [];
+  const names = [];
+  for (const abs of pickedAbs) {
+    let st;
+    try {
+      st = fs.statSync(abs);
+    } catch {
+      continue;
+    }
+    if (!st.isFile() || st.size > PRE_LAUNCH_EXEMPLAR_MAX_BYTES_EACH) continue;
+    let buf;
+    try {
+      buf = fs.readFileSync(abs);
+    } catch {
+      continue;
+    }
+    try {
+      parts.push(createPartFromBase64(buf.toString("base64"), "application/pdf"));
+      names.push(path.basename(abs));
+    } catch {
+      /* skip malformed reads */
+    }
+  }
+  return { parts, names };
+}
+
+app.post("/api/creator/pre-launch-reflection", async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
+  }
+  const {
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    objectives = [],
+    supportingAttachments = [],
+  } = req.body || {};
+
+  const objClean = Array.isArray(objectives)
+    ? objectives.map((o) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+    : [];
+
+  const exemplarSeed = [projectTitle, essentialQuestion, objClean.join("|")].join(":::");
+  const { parts: exemplarBriefParts, names: exemplarBriefNames } = loadPblWorksExemplarGeminiParts(exemplarSeed);
+
+  const userUploadParts = [];
+  const attachedNames = [];
+  const arr = Array.isArray(supportingAttachments) ? supportingAttachments.slice(0, 5) : [];
+  for (const a of arr) {
+    if (!a?.data || typeof a.data !== "string") continue;
+    const name = a.name || "document";
+    const mime = normalizeBriefMimeType(name, a.mimeType);
+    const low = mime.toLowerCase();
+    if (
+      low.includes("pdf") ||
+      low.includes("text/plain") ||
+      low.includes("markdown") ||
+      low.includes("html") ||
+      low.includes("csv")
+    ) {
+      userUploadParts.push(createPartFromBase64(a.data, mime));
+      attachedNames.push(name);
+    }
+  }
+
+  const fallbackJson = JSON.stringify(PRE_LAUNCH_FALLBACK_SECTIONS);
+
+  const exemplarNote =
+    exemplarBriefNames.length > 0
+      ? `Reference exemplars (system library — authentic **PBLWorks-style project brief** PDFs attached FIRST in this request):
+Filenames: ${exemplarBriefNames.join(", ")}
+
+How to use them:
+- Notice how teacher-facing reflection prompts are written under the three canonical headings when those sections appear (tone, specificity, length, bullet patterns).
+- Use them ONLY as **style templates**. Do **not** reuse questions about another unit's topic (water quality, migration, tiny houses, cyberbullying, etc.).
+- Every question you output must be freshly adapted to THIS teacher's project fields below.
+
+`
+      : "";
+
+  const userPrompt = `You support teachers planning project-based learning (PBL).
+
+${exemplarNote}Project title: ${projectTitle || "(not specified)"}
+Essential question: ${essentialQuestion || "(not specified)"}
+Summary / excerpt: ${projectSummary || "(not specified)"}
+Learning objectives: ${objClean.join("; ") || "(not specified)"}
+Teacher-uploaded file names (if any): ${attachedNames.length ? attachedNames.join(", ") : "(none)"}
+
+Task — teacher **pre-launch reflection** questions grouped under these EXACT headings (use verbatim spelling/capitalization/punctuation for headings):
+1) Reflect on your students
+2) Reflect on your context
+3) Reflect on your content & skills
+
+Instructions:
+- If ANY **teacher-uploaded** document(s) contain sections whose titles clearly match those three headings (minor wording variance OK), copy **verbatim** every numbered/bulleted question under each matched section into the JSON (preserve teacher-facing wording). Prefer the teacher's own uploads over inventing text.
+- When you must **adapt** or fill gaps, mirror the **question style** shown in the reference exemplar briefs (if provided)—same classroom-realistic voice—but rewrite **content** so every question targets THIS project's topic, audience, and constraints.
+- If a heading is still thin after extraction, enrich using NEW questions aligned to this project. You may also consult this compact JSON example bank for structure only (not verbatim topic wording): ${fallbackJson}
+- Set JSON field "source" to "extracted" ONLY if at least two headings drew primarily verbatim questions from **teacher-uploaded** attachments (not from system exemplars alone); otherwise "adapted".
+
+Reply with ONLY valid JSON (no markdown fences):
+{"source":"extracted"|"adapted","sections":[{"heading":"Reflect on your students","questions":["..."]},{"heading":"Reflect on your context","questions":["..."]},{"heading":"Reflect on your content & skills","questions":["..."]}]}`;
+
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const systemInstruction =
+    "You extract and compose teacher reflection prompts for K–12 PBL planning. Reply with only valid JSON, no markdown fences.";
+
+  try {
+    const orderedParts = [...exemplarBriefParts, ...userUploadParts];
+    const contents =
+      orderedParts.length > 0 ? createUserContent([...orderedParts, userPrompt]) : userPrompt;
+    const models = chatModelCandidates("gemini-2.5-flash");
+    const response = await geminiGenerateContentWithModelFallback(ai, models, {
+      contents,
+      config: { systemInstruction },
+    });
+    const text = response?.text ?? "";
+    const parsed = parseJsonFromModelText(text);
+    if (!parsed || typeof parsed !== "object") {
+      const fb = {
+        source: "adapted",
+        sections: PRE_LAUNCH_FALLBACK_SECTIONS.map((s) => ({
+          heading: s.heading,
+          questions: s.questions.slice(),
+        })),
+        generatedAt: new Date().toISOString(),
+        projectTitleSnapshot: String(projectTitle || "").trim() || "(Untitled project)",
+      };
+      return res.json(fb);
+    }
+    const normalized = normalizePreLaunchGeminiSections(parsed);
+    res.json({
+      ...normalized,
+      generatedAt: new Date().toISOString(),
+      projectTitleSnapshot: String(projectTitle || "").trim() || "(Untitled project)",
+    });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -622,11 +1012,15 @@ ${phaseStr || "(no phases listed yet—use phasesEnabled all true for every memb
 ${phaseCountNote}
 
 Requirements for ALL ${count} members:
-- Each needs a specific, memorable first name (or first + last) and a clear job title. **No two members may cover the same primary angle**—spread expertise across distinct domains (e.g. only one "science" lens, one community/cultural lens, one literacy/communication lens, one ethics or civics lens, one design or technical lens, etc.). If the project needs overlap, differentiate sharply in audience or method (e.g. field biologist vs data analyst).
-- Each systemInstruction must be a concise paragraph: how they advise students, tone supportive coach, grade 6–8, mostly questions and prompts rather than lectures.
+- Each needs a specific, memorable first name (or first + last) and a clear job title. **No two members may cover the same primary angle**—spread expertise across distinct domains (e.g. only one physical/science lens, one community/cultural lens, one literacy or storytelling lens, one ethics or civics lens, one quantitative or technical lens). If overlap is unavoidable, differentiate sharply in **method** (e.g. ethnographic interviews vs GIS maps vs youth podcast production).
+- Give each member a **different "thinking fingerprint"**: one might lean on measurement and constraints; another on ethics and who benefits; another on oral history and narrative; another on prototyping and testing; another on policy or institutional partnerships—assign explicitly in the text so voices cannot collapse into the same advice.
+- Each systemInstruction must be **140–320 words** and structured as plain prose with ALL of: (1) **Background**: 1–2 sentences of plausible lived/work experience (specific institutions, regions, or communities types—not vague "many years"). (2) **Expertise**: two narrow specialties written as noun phrases (not single generic labels like "science"). (3) **What they push students to notice**: typical blind spots or tensions only their lens surfaces. (4) **Signature move**: one repeatable coaching habit (e.g. always asks for evidence sources, always asks whose voice is missing, always asks for a cheap prototype). (5) **Anti-pattern**: one thing this advisor refuses to do (e.g. won't pick topics for the team, won't praise without a probing question).
+- **Anti-repetition (critical):** Members must NOT share the same opening hooks, moral-of-the-story framings, clichés ("think critically", "dig deeper" without a prompt), or identical question stems. If two answers could start with the same sentence, rewrite until they diverge.
+- Tone: supportive coach for grades 6–8; mostly questions and prompts rather than lectures; avoid repeating boilerplate across members.
 - Roles must complement each other (collectively cover the project) and align with the phases and objectives above.
 
-Reply with ONLY valid JSON. The "members" array MUST contain exactly ${count} objects:
+Reply with ONLY valid JSON. Each member object must fully satisfy the systemInstruction rules above (length, structure, anti-repetition).
+The "members" array MUST contain exactly ${count} objects:
 {"members":[{"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"${phaseCount > 0 ? `,"phasesEnabled":[${Array(phaseCount).fill("true").join(",")}]` : ""}}, ...]}
 
 Replace phasesEnabled with your chosen true/false pattern (${phaseCount} entries per member).${phaseCount === 0 ? " If there are zero phases, omit phasesEnabled or use []." : ""}
@@ -690,7 +1084,13 @@ app.post("/api/creator/regenerate-member", async (req, res) => {
           .map((o) => {
             const jt = typeof o?.jobTitle === "string" ? o.jobTitle.trim() : "";
             const nm = typeof o?.name === "string" ? o.name.trim() : "";
-            return jt || nm ? `- ${nm || "Member"} — ${jt || "Advisor"}` : null;
+            const rawCf = typeof o?.coachingFocus === "string" ? o.coachingFocus.replace(/\s+/g, " ").trim() : "";
+            const cf = rawCf.slice(0, 340);
+            const head = jt || nm ? `- ${nm || "Member"} — ${jt || "Advisor"}` : null;
+            if (!head) return null;
+            return cf
+              ? `${head}\n  Their coaching lens (paraphrase—do NOT copy phrasing): ${cf}${rawCf.length > 340 ? "…" : ""}`
+              : head;
           })
           .filter(Boolean)
           .join("\n")
@@ -698,10 +1098,10 @@ app.post("/api/creator/regenerate-member", async (req, res) => {
   const coverageInstruction = siblingBlock
     ? `
 
-These roles are ALREADY filled by OTHER council members (do not duplicate their core expertise, discipline, or stakeholder angle):
+These roles are ALREADY filled by OTHER council members (do not duplicate their core expertise, discipline, stakeholder angle, or **signature questioning habit**):
 ${siblingBlock}
 
-Your NEW role must fill a clear **gap**: a different discipline, community voice, skill set, or function that is not already represented above (e.g. if STEM and writing exist, add ethics, indigenous knowledge, facilitation, arts, family engagement, logistics, etc.—whatever best fits the project and is still missing).`
+Your NEW role must fill a clear **gap**: a different discipline, community voice, skill set, or function that is not already represented above (e.g. if STEM and writing exist, add ethics, indigenous knowledge, facilitation, arts, family engagement, logistics, etc.—whatever best fits the project and is still missing). The new systemInstruction must follow the same richness rules as bulk generation (background, two narrow specialties, blind spots, signature move, anti-pattern) and must read as clearly distinct from every sibling above.`
     : "";
 
   const prompt = `Create ONE new AI council member role for this PBL project. Use a different name than: ${avoid}.
@@ -715,6 +1115,8 @@ Phases: ${phaseStr}
 
 Reply with ONLY valid JSON:
 {"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"${phaseCount > 0 ? `,"phasesEnabled":[${Array(phaseCount).fill("true").join(",")}]` : ""}}
+
+systemInstruction must be 140–320 words and include: specific background; two narrow expertise phrases; blind spots students miss from this lens; one signature coaching habit; one explicit anti-pattern (what they refuse to do). No generic filler repeated from typical PBL templates.
 
 Include "phasesEnabled" only when ${phaseCount} > 0: exactly ${phaseCount} booleans in phase order (true where this new role helps students in that phase, false where not needed). At least one true.
 
@@ -1428,8 +1830,9 @@ function buildCustomCouncilContext(councilProject) {
 }
 
 app.post("/api/chat/custom", async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ error: "Server missing GEMINI_API_KEY. Add it to .env and restart." });
+  const openai = getOpenAIClient();
+  if (!openai) {
+    return res.status(503).json({ error: "Server missing OPENAI_API_KEY. Add it to .env and restart." });
   }
 
   const {
@@ -1470,14 +1873,12 @@ app.post("/api/chat/custom", async (req, res) => {
   userPrompt = userPrompt + resourceInstruction;
 
   const projectContext = buildCustomCouncilContext(councilProject);
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-  const attachmentParts = [];
+  const attachmentContentParts = [];
   if (hasAttachments) {
     for (const a of rawAttachments) {
-      if (a && typeof a.data === "string" && a.mimeType) {
-        attachmentParts.push(createPartFromBase64(a.data, a.mimeType));
-      }
+      const p = openAiBrowserAttachmentToContentPart(a);
+      if (p) attachmentContentParts.push(p);
     }
   }
 
@@ -1512,17 +1913,15 @@ app.post("/api/chat/custom", async (req, res) => {
   await Promise.all(
     toRun.map(async (gem) => {
       try {
-        const model = gem.model || "gemini-2.5-flash";
-        const allParts = [...attachmentParts, projectContext + "\n" + userPrompt];
-        const contents = allParts.length > 1 ? createUserContent(allParts) : projectContext + "\n" + userPrompt;
-        const responseInstruction =
+        const userContentParts = [...attachmentContentParts, { type: "input_text", text: projectContext + "\n" + userPrompt }];
+        const peerBlock = buildOpenAiPeerDifferentiationBlock(toRun, gem.id, (g) =>
+          typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"
+        );
+        const instructions =
           (gem.systemInstruction || "") +
+          peerBlock +
           `\n\n${projectContext}\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
-        const response = await geminiGenerateContentWithModelFallback(ai, chatModelCandidates(model), {
-          contents,
-          config: { systemInstruction: responseInstruction },
-        });
-        const text = response?.text ?? "";
+        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
         results.push({
           gemId: gem.id,
           name: gem.name,
@@ -1549,8 +1948,9 @@ app.post("/api/chat/custom", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  if (!GEMINI_API_KEY) {
-    return res.status(503).json({ error: "Server missing GEMINI_API_KEY. Add it to .env and restart." });
+  const openai = getOpenAIClient();
+  if (!openai) {
+    return res.status(503).json({ error: "Server missing OPENAI_API_KEY. Add it to .env and restart." });
   }
 
   const { selectedGems = [], prompt, attachments: rawAttachments, followUpPreviousResponse, opinionOnResponse } = req.body;
@@ -1576,50 +1976,49 @@ app.post("/api/chat", async (req, res) => {
   const resourceInstruction = `\n\n[Instruction for council member: The user's approximate location is: ${locationStr}. At the end of your response, add a short "Follow up in your community" section. Suggest ONE specific local or regional resource to help the user explore this topic further, based on their question and your response. Prefer: tribal councils, museums with relevant exhibits (e.g. Native American or indigenous culture), university departments with relevant experts, or non-profits. For the resource: (1) Always hyperlink the website—use a full URL (https://...) for any site you mention. (2) Include a phone number and email address when you can find them. (3) When possible, name a specific contact person (e.g. a department director, educator, or program coordinator) at a university department or museum. Include the resource name, working website URL, phone number if known, and email when possible. If you cannot name a specific institution, suggest the type of place to look and brief guidance. Keep this section concise.]`;
   userPrompt = userPrompt + resourceInstruction;
 
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const results = [];
   const gemConfigs = GEMS.filter((g) => selectedGems.includes(g.id));
 
-  // Upload each unique document once (avoids "Failed to create file" when multiple members run in parallel).
-  const allDocPaths = new Set(gemConfigs.flatMap((g) => Array.isArray(g.documents) ? g.documents : []));
-  const uploadedDocs = new Map();
-  for (const rel of allDocPaths) {
-    try {
-      const u = await uploadDocForGem(ai, rel);
-      if (u) uploadedDocs.set(rel, u);
-    } catch (e) {
-      console.warn(`Document upload skipped: ${rel}`, e.message);
-    }
-  }
+  const allDocPaths = new Set(gemConfigs.flatMap((g) => (Array.isArray(g.documents) ? g.documents : [])));
+  const uploadedDocIds = new Map();
+  await Promise.all(
+    [...allDocPaths].map(async (rel) => {
+      try {
+        const id = await openAiEnsureDocFileId(openai, rel);
+        if (id) uploadedDocIds.set(rel, id);
+      } catch (e) {
+        console.warn(`OpenAI file upload skipped: ${rel}`, e.message);
+      }
+    })
+  );
 
-  const attachmentParts = [];
+  const attachmentContentParts = [];
   if (hasAttachments) {
     for (const a of rawAttachments) {
-      if (a && typeof a.data === "string" && a.mimeType) {
-        attachmentParts.push(createPartFromBase64(a.data, a.mimeType));
-      }
+      const p = openAiBrowserAttachmentToContentPart(a);
+      if (p) attachmentContentParts.push(p);
     }
   }
 
   await Promise.all(
     gemConfigs.map(async (gem) => {
       try {
+        const userContentParts = [];
         const docPaths = Array.isArray(gem.documents) ? gem.documents : [];
-        const fileParts = [];
         for (const rel of docPaths) {
-          const u = uploadedDocs.get(rel);
-          if (u) fileParts.push(createPartFromUri(u.uri, u.mimeType));
+          const fid = uploadedDocIds.get(rel);
+          if (fid) userContentParts.push({ type: "input_file", file_id: fid });
         }
-        const allParts = [...attachmentParts, ...fileParts, userPrompt];
-        const contents = allParts.length > 1 ? createUserContent(allParts) : userPrompt;
-        const responseInstruction =
+        for (const p of attachmentContentParts) userContentParts.push(p);
+        userContentParts.push({ type: "input_text", text: userPrompt });
+
+        const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name);
+        const instructions =
           (gem.systemInstruction || "") +
+          peerBlock +
           `\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
-        const response = await geminiGenerateContentWithModelFallback(ai, chatModelCandidates(gem.model), {
-          contents,
-          config: { systemInstruction: responseInstruction },
-        });
-        const text = response?.text ?? "";
+
+        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
         results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
       } catch (err) {
         results.push({
@@ -1640,7 +2039,9 @@ app.post("/api/chat", async (req, res) => {
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
-    if (!GEMINI_API_KEY) console.warn("Warning: GEMINI_API_KEY not set. Add it to .env to use the Gems.");
+    if (!GEMINI_API_KEY) console.warn("Warning: GEMINI_API_KEY not set. Creator flows need GEMINI_API_KEY.");
+    if (!OPENAI_API_KEY || !String(OPENAI_API_KEY).trim())
+      console.warn("Warning: OPENAI_API_KEY not set. Council chat needs OPENAI_API_KEY.");
   });
 }
 
