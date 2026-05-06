@@ -1030,6 +1030,37 @@ input.creator-file::file-selector-button:hover {
   background: rgba(37, 99, 235, 0.12);
 }
 
+.project-list-icon-btn.project-list-icon-teacher {
+  flex-shrink: 0;
+  background: #16a34a;
+  color: #fff;
+}
+
+.project-list-icon-btn.project-list-icon-teacher:hover {
+  background: #15803d;
+}
+
+.teacher-menu-bars-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 14px;
+}
+
+.teacher-menu-bars-sm span {
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.prelaunch-empty {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .project-list-link {
   display: flex;
   flex-direction: column;

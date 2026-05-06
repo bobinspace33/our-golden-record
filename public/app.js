@@ -723,6 +723,48 @@ function getProjectPhase() {
   return r ? r.value : "1";
 }
 
+/** Normalize ids so numeric member ids stay comparable across string/number mismatches. */
+function canonicalGemId(id) {
+  const n = Number(id);
+  return Number.isNaN(n) ? id : n;
+}
+
+function selectionContainsGemId(selectedSet, gemId) {
+  const gid = canonicalGemId(gemId);
+  for (const sid of selectedSet) {
+    if (canonicalGemId(sid) === gid) return true;
+  }
+  return false;
+}
+
+function selectionIdMatchesEnabled(enabledIds, gemId) {
+  const gid = canonicalGemId(gemId);
+  for (const eid of enabledIds) {
+    if (canonicalGemId(eid) === gid) return true;
+  }
+  return false;
+}
+
+function pruneSelectionToCurrentPhase() {
+  const enabledIds = getEnabledMemberIds(getProjectPhase());
+  [...selectedIds].forEach((id) => {
+    if (!selectionIdMatchesEnabled(enabledIds, id)) selectedIds.delete(id);
+  });
+}
+
+function toggleGemSelection(gemId) {
+  const gid = canonicalGemId(gemId);
+  let existing = null;
+  for (const sid of selectedIds) {
+    if (canonicalGemId(sid) === gid) {
+      existing = sid;
+      break;
+    }
+  }
+  if (existing !== null) selectedIds.delete(existing);
+  else selectedIds.add(gid);
+}
+
 const PHASE_MILESTONE_LABELS = {
   1: "Community Charter",
   2: "Artifact Curation",
@@ -771,12 +813,12 @@ function renderGems() {
   const enabledIds = getEnabledMemberIds(phase);
   gemsGrid.innerHTML = "";
   gems.forEach((gem) => {
-    const enabled = enabledIds.has(gem.id);
+    const enabled = selectionIdMatchesEnabled(enabledIds, gem.id);
     const card = document.createElement("div");
     const isHuman = APP_KIND === "custom" && gem.isHuman;
     card.className =
       "gem-card" +
-      (selectedIds.has(gem.id) ? " selected" : "") +
+      (selectionContainsGemId(selectedIds, gem.id) ? " selected" : "") +
       (enabled ? "" : " disabled") +
       (isHuman ? " gem-card-human" : "");
     card.dataset.colorIndex = String(((Number(gem.id) - 1) % 5) + 1);
@@ -810,11 +852,7 @@ function renderGems() {
       if (enabled) {
         card.addEventListener("click", (e) => {
           if (e.target.closest(".gem-replace-human-hit")) return;
-          if (selectedIds.has(gem.id)) {
-            selectedIds.delete(gem.id);
-          } else {
-            selectedIds.add(gem.id);
-          }
+          toggleGemSelection(gem.id);
           renderGems();
           setSubmitState();
         });
@@ -846,11 +884,7 @@ function renderGems() {
     if (enabled) {
       card.addEventListener("click", (e) => {
         if (e.target.closest(".gem-replace-human-hit")) return;
-        if (selectedIds.has(gem.id)) {
-          selectedIds.delete(gem.id);
-        } else {
-          selectedIds.add(gem.id);
-        }
+        toggleGemSelection(gem.id);
         renderGems();
         setSubmitState();
       });
@@ -2044,7 +2078,12 @@ function loadRecentChats() {
               lastSelectedGems = c.selectedGems || [];
               lastResults = c.results || [];
               promptInput.value = c.prompt;
-              selectedIds = new Set((c.selectedGems || []).map((id) => Number(id)).filter(Boolean));
+              selectedIds = new Set(
+                (c.selectedGems || [])
+                  .map((id) => canonicalGemId(id))
+                  .filter((id) => !(typeof id === "number" && Number.isNaN(id)))
+              );
+              pruneSelectionToCurrentPhase();
               const jobTitleMap = {};
               (c.results || []).forEach((r) => { jobTitleMap[r.name] = r.jobTitle || ""; });
               renderGems();
@@ -2083,7 +2122,14 @@ recentChatsDropdown.addEventListener("click", (e) => e.stopPropagation());
 
 async function submit() {
   const prompt = promptInput.value.trim();
-  if (selectedIds.size === 0) return;
+  const enabledIds = getEnabledMemberIds(getProjectPhase());
+  const idsToSend = Array.from(selectedIds).filter((id) => selectionIdMatchesEnabled(enabledIds, id));
+  if (idsToSend.length === 0) {
+    if (selectedIds.size > 0) {
+      setStatus("None of the selected members are active for this project phase. Change phase or select members who are active now.", "error");
+    }
+    return;
+  }
   if (!prompt && attachments.length === 0) return;
 
   submitBtn.classList.add("loading");
@@ -2095,7 +2141,7 @@ async function submit() {
 
   try {
     const body = {
-      selectedGems: Array.from(selectedIds),
+      selectedGems: idsToSend,
       prompt: prompt || "(See attached files.)",
       attachments: attachments.length > 0 ? attachments.map((a) => ({ name: a.name, mimeType: a.mimeType, data: a.data })) : undefined,
     };
@@ -2113,7 +2159,7 @@ async function submit() {
     }
 
     lastPrompt = prompt || "(Attached files)";
-    lastSelectedGems = Array.from(selectedIds);
+    lastSelectedGems = idsToSend;
     lastResults = data.results || [];
     attachments = [];
     renderAttachments();
@@ -2157,7 +2203,8 @@ async function loadGems() {
       image: m.image || null,
       isHuman: !!m.isHuman,
     }));
-    selectedIds = new Set(gems.filter((g) => !g.isHuman).map((g) => g.id));
+    selectedIds = new Set();
+    pruneSelectionToCurrentPhase();
     renderGems();
     syncPhaseMilestoneTitle();
     setSubmitState();
@@ -2178,17 +2225,14 @@ async function loadGems() {
       { id: 5, name: "Carl", jobTitle: "Interstellar Linguist", image: "carl.jpg" },
     ];
   }
+  pruneSelectionToCurrentPhase();
   renderGems();
   syncPhaseMilestoneTitle();
   setSubmitState();
 }
 
 function onPhaseChange() {
-  const phase = getProjectPhase();
-  const enabledIds = getEnabledMemberIds(phase);
-  selectedIds.forEach((id) => {
-    if (!enabledIds.has(id)) selectedIds.delete(id);
-  });
+  pruneSelectionToCurrentPhase();
   syncPhaseMilestoneTitle();
   renderGems();
   setSubmitState();

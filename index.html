@@ -16,7 +16,7 @@
       <h1>PBL Council Creator</h1>
       <p class="tagline">Design a council of AI (and human) stakeholders for any project-based learning unit. Open an existing council or build a new one.</p>
     </header>
-<br>
+
     <section class="home-section">
       <h2 class="home-section-title">Saved drafts</h2>
       <p class="home-section-desc">Templates you saved before launch—continue editing anytime.</p>
@@ -36,6 +36,51 @@
       <a href="/create.html" class="btn-launch-council home-create-btn">Create New Council</a>
     </section>
   </div>
+
+  <div
+    class="teacher-menu-overlay"
+    id="teacherMenuModal"
+    hidden
+    aria-modal="true"
+    role="dialog"
+    aria-labelledby="teacherMenuTitle"
+  >
+    <div class="teacher-menu-backdrop" data-close-tm="1"></div>
+    <div class="teacher-menu-panel">
+      <h2 class="teacher-menu-title" id="teacherMenuTitle">Teacher menu</h2>
+      <button type="button" class="teacher-menu-row" id="teacherMenuPreLaunchBtn">Pre-Launch Reflection</button>
+      <button
+        type="button"
+        class="teacher-menu-row teacher-menu-row--disabled"
+        id="teacherMenuRubricsBtn"
+        disabled
+        title="Wiring in progress"
+      >
+        Rubric access <span class="teacher-menu-soon">(when wired)</span>
+      </button>
+      <button type="button" class="btn-secondary teacher-menu-close" data-close-tm="1">Close</button>
+    </div>
+  </div>
+
+  <div class="prelaunch-overlay" id="preLaunchModal" hidden aria-modal="true" role="dialog" aria-labelledby="preLaunchTitle">
+    <div class="prelaunch-backdrop" data-close-pl="1"></div>
+    <div class="prelaunch-panel">
+      <div class="prelaunch-panel-head">
+        <h2 class="prelaunch-title" id="preLaunchTitle">Teacher Pre-Launch Reflection</h2>
+        <button type="button" class="prelaunch-close" data-close-pl="1" aria-label="Close">×</button>
+      </div>
+      <p class="prelaunch-meta" id="preLaunchMeta"></p>
+      <p class="prelaunch-hint" id="preLaunchLaunchHint" hidden></p>
+      <div class="prelaunch-scroll" id="preLaunchBody"></div>
+      <div class="prelaunch-actions">
+        <button type="button" class="btn-secondary" id="preLaunchDownloadPdf">Download PDF</button>
+        <button type="button" class="btn-secondary" data-close-pl="1">Close</button>
+        <button type="button" class="btn-launch-council" id="preLaunchLaunchCouncilBtn" hidden>Launch Council</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
   <script src="home.js"></script>
 </body>
 </html>
