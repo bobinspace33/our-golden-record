@@ -401,8 +401,19 @@ function councilUserPromptCharLimit(gradeLevel) {
 /** Follow-up questions are always capped regardless of grade band. */
 const COUNCIL_FOLLOW_UP_PROMPT_MAX_CHARS = 144;
 
+/** Strong default for chat models (e.g. GPT-5.x) that tend to over-solve: coach with questions, not blueprints. */
+function openAiReflectiveCoachingStyleBlock() {
+  return `**Response style — reflective coach (non-negotiable):**
+- Lead with **curiosity**, not final answers. The bulk of each reply should be **questions, tradeoffs, and prompts** so the learner and their **team** keep thinking—**not** a turnkey solution, finished design, or long step-by-step plan unless they only asked for a short definition.
+- Regularly use **collaborative stems** such as **"Talk to your group about…"**, **"Consider whether…"**, **"What might change if…"**, **"Before you decide, revisit…"**, **"Which of your criteria matters most here—and why?"** Aim for **several** such nudges per reply, woven into short paragraphs.
+- You may offer **one** clear **directional** insight from your role, but pair it with a **question** or tension—do **not** choose the team’s design, topic, or implementation for them when they are deciding *what* to do.
+- If they ask what they **should** pick or do, **reframe** into **criteria, scenarios, or questions** their group can use to decide—not a single prescribed outcome.
+- Keep any factual gloss **brief** and in service of the next thing they should wrestle with. If the batch is an *opinion-on-another-advisor* task, still honor agree/critique, but keep it probing rather than lecturing.`;
+}
+
 function buildOpenAiChatGlobalEducationGuidance(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
+  const reflective = openAiReflectiveCoachingStyleBlock();
   const stayOnTopic =
     "Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas with questions, never shame the learner. **Stay strictly on-topic** for the learner's project question; do not drift into unrelated subjects.";
 
@@ -418,7 +429,9 @@ Safety and boundaries for minors: no sexual content; no instructions for weapons
 
 You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).
 
-When several advisors answer the same student message in one round, each reply must be unmistakably different: varied framing, emphasis, and closing “follow up” suggestion—never copied templates or near-identical paragraphs across voices.`;
+When several advisors answer the same student message in one round, each reply must be unmistakably different: varied framing, emphasis, and closing “follow up” suggestion—never copied templates or near-identical paragraphs across voices.
+
+${reflective}`;
   }
 
   if (g === "HS") {
@@ -433,7 +446,9 @@ Safety and boundaries: no sexual content; no instructions for weapons, drugs, se
 
 Serious topics may be addressed in a factual, classroom-appropriate way without graphic detail.
 
-When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.`;
+When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.
+
+${reflective}`;
   }
 
   return `[Educational product — global rules for every reply]
@@ -445,7 +460,9 @@ ${stayOnTopic}
 
 Safety and boundaries: no illegal instructions; no sexual content targeted at minors; no harassment; no enabling self-harm. Do not encourage academic dishonesty—coach understanding rather than supplying graded deliverables. Do not fabricate private facts about individuals.
 
-When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.`;
+When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.
+
+${reflective}`;
 }
 
 function customCouncilLexileTailInstruction(gradeLevel) {
