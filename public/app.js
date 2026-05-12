@@ -159,6 +159,9 @@ let customCouncilProject = null;
 const HUMAN_ADVISOR_SYSTEM_INSTRUCTION =
   "Human community advisor. This slot is filled by a real-world contact in the educator's region. Encourage students to connect professionally and verify contact details before outreach.";
 
+const HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION =
+  "Human community advisor. This slot represents a **school-community** connection (parent, volunteer, or partner your school coordinates—not an unsupervised internet contact). Encourage students to work through their teacher for introductions, respect privacy, and treat outreach as a supervised classroom activity.";
+
 let replaceHumanGemId = null;
 let replaceHumanPendingImage = null;
 /** Dedupe keys (`name | org`) for experts shown this modal session; each Search excludes these plus member.excludedLocalExperts. */
@@ -224,11 +227,22 @@ function setReplaceHumanSearchLoading(loading, isAnotherSearch) {
   const overlay = document.getElementById("replaceHumanEditorOverlay");
   const panel = document.querySelector(".replace-human-editor-panel");
   if (msgEl) {
-    msgEl.textContent = isAnotherSearch ? "Finding another contact…" : "Searching for a local expert…";
+    const g = getCouncilGradeLevelForUi();
+    const k8 = g === "3-5" || g === "6-8";
+    msgEl.textContent = k8
+      ? isAnotherSearch
+        ? "Finding another community member…"
+        : "Searching school community…"
+      : isAnotherSearch
+        ? "Finding another contact…"
+        : "Searching for a local expert…";
   }
   if (subEl) {
-    subEl.textContent =
-      "Using your project, location, and this seat’s role. This can take a little while—please wait.";
+    const g = getCouncilGradeLevelForUi();
+    const k8 = g === "3-5" || g === "6-8";
+    subEl.textContent = k8
+      ? "Matching your project theme to school-community profiles (demo roster). This can take a little while—please wait."
+      : "Using your project, location, and this seat’s role. This can take a little while—please wait.";
   }
   if (loadEl) {
     loadEl.hidden = !loading;
@@ -277,6 +291,7 @@ async function runReplaceHumanLocalSearch() {
         essentialQuestion,
         roleTitle,
         excludeExperts,
+        gradeLevel: getCouncilGradeLevelForUi(),
       }),
     });
     const raw = await res.json();
@@ -1230,7 +1245,9 @@ function applyReplaceHumanEditorSave() {
   mm.localExpert = null;
   mm.excludedLocalExperts = Array.isArray(mm.excludedLocalExperts) ? mm.excludedLocalExperts : [];
   mm.image = image;
-  mm.systemInstruction = HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
+  const g = getCouncilGradeLevelForUi();
+  mm.systemInstruction =
+    g === "3-5" || g === "6-8" ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION : HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
   mm.humanContact = {
     name,
     title,

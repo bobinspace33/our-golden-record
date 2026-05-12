@@ -183,6 +183,9 @@ function markMemberCardFieldsAiFilled(idx) {
 
 const ALLOWED_GRADE_LEVELS = ["3-5", "6-8", "HS", "Uni+"];
 
+const HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION =
+  "Human community advisor. This slot represents a **school-community** connection (parent, volunteer, or partner your school coordinates—not an unsupervised internet contact). Encourage students to work through their teacher for introductions, respect privacy, and treat outreach as a supervised classroom activity.";
+
 function getGradeLevelFromForm() {
   const el = document.querySelector('input[name="gradeLevel"]:checked');
   const v = el?.value;
@@ -612,12 +615,26 @@ const localExpertModal = { memberIdx: null, data: null };
 
 function setLocalExpertLoadingMessage(isAnother) {
   const p = document.getElementById("lemLoadingMessage");
-  if (p) p.textContent = isAnother ? "Finding another contact…" : "Finding a local expert…";
+  const gl = getGradeLevelFromForm();
+  const k8 = gl === "3-5" || gl === "6-8";
+  if (p) {
+    if (k8) {
+      p.textContent = isAnother ? "Finding another community member…" : "Finding a school-community match…";
+    } else {
+      p.textContent = isAnother ? "Finding another contact…" : "Finding a local expert…";
+    }
+  }
   const sub = document.getElementById("lemLoadingSub");
   if (sub) {
-    sub.textContent = isAnother
-      ? "Excluding people you already saw—we’re looking for a different match."
-      : "Using your project and approximate location. This can take up to a minute—please wait.";
+    if (k8) {
+      sub.textContent = isAnother
+        ? "Excluding people you already saw—we’re picking someone else from the roster or a generated fit."
+        : "Matching project theme to volunteer-style profiles (school community only). This can take up to a minute—please wait.";
+    } else {
+      sub.textContent = isAnother
+        ? "Excluding people you already saw—we’re looking for a different match."
+        : "Using your project and approximate location. This can take up to a minute—please wait.";
+    }
   }
 }
 
@@ -694,8 +711,11 @@ function applyExpertToMember(idx, data) {
   m.portraitGender = null;
   m.name = display;
   m.jobTitle = n.title || n.organization || m.jobTitle;
+  const gl = getGradeLevelFromForm();
   m.systemInstruction =
-    "Human community advisor. This slot is filled by a real-world contact in the educator’s region. Encourage students to connect professionally and verify contact details before outreach.";
+    gl === "3-5" || gl === "6-8"
+      ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION
+      : "Human community advisor. This slot is filled by a real-world contact in the educator’s region. Encourage students to connect professionally and verify contact details before outreach.";
   m.image = pickExpertImageUrl(n, display);
   m.humanContact = {
     name: display,
@@ -732,6 +752,7 @@ async function fetchLocalExpertIntoModal(idx, excludeCurrentBeforeFetch) {
         essentialQuestion: getEssentialQuestion(),
         roleTitle,
         excludeExperts,
+        gradeLevel: getGradeLevelFromForm(),
       }),
     });
     const raw = await res.json();

@@ -1657,27 +1657,331 @@ async function pickImageFromContactWebsite(contact) {
   }
 }
 
+const COMMUNITY_PERSONAS_CSV = path.join(PUBLIC_DIR, "Community-personas.csv");
+/** Minimum overlap score (occupation / work experience / education vs. project text) to pick a roster row before falling back to a synthetic match. */
+const COMMUNITY_ROSTER_MATCH_MIN_SCORE = 2;
+
+const COMMUNITY_QUERY_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "of",
+  "as",
+  "by",
+  "with",
+  "from",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "must",
+  "can",
+  "this",
+  "that",
+  "these",
+  "those",
+  "our",
+  "your",
+  "their",
+  "they",
+  "them",
+  "how",
+  "what",
+  "when",
+  "where",
+  "why",
+  "which",
+  "who",
+  "about",
+  "into",
+  "through",
+  "any",
+  "all",
+  "each",
+  "some",
+  "more",
+  "most",
+  "other",
+  "than",
+  "then",
+  "not",
+  "no",
+  "yes",
+  "also",
+  "just",
+  "student",
+  "students",
+  "project",
+  "projects",
+  "school",
+  "learning",
+  "class",
+  "classroom",
+  "work",
+  "like",
+]);
+
+let communityPersonasCache = null;
+let communityPersonasCacheMtimeMs = null;
+
+function parseCommunityCsvLine(line) {
+  const out = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else inQ = false;
+      } else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function loadCommunityPersonaRows() {
+  try {
+    const st = fs.statSync(COMMUNITY_PERSONAS_CSV);
+    if (communityPersonasCache && communityPersonasCacheMtimeMs === st.mtimeMs) {
+      return communityPersonasCache;
+    }
+    const raw = fs.readFileSync(COMMUNITY_PERSONAS_CSV, "utf8");
+    const lines = raw.split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) {
+      communityPersonasCache = [];
+      communityPersonasCacheMtimeMs = st.mtimeMs;
+      return communityPersonasCache;
+    }
+    const header = parseCommunityCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+    const col = (label) => header.indexOf(label.toLowerCase());
+    const iName = col("name");
+    const iAge = col("age");
+    const iGender = col("gender");
+    const iOcc = col("occupation");
+    const iWx = col("work experience");
+    const iEdu = col("education");
+    if (iName === -1) {
+      communityPersonasCache = [];
+      communityPersonasCacheMtimeMs = st.mtimeMs;
+      return communityPersonasCache;
+    }
+    const rows = [];
+    for (let li = 1; li < lines.length; li++) {
+      const vals = parseCommunityCsvLine(lines[li]);
+      if (!vals.length) continue;
+      const name = (vals[iName] || "").trim();
+      if (!name) continue;
+      rows.push({
+        name,
+        age: iAge >= 0 ? (vals[iAge] || "").trim() : "",
+        gender: iGender >= 0 ? (vals[iGender] || "").trim() : "",
+        occupation: iOcc >= 0 ? (vals[iOcc] || "").trim() : "",
+        workExperience: iWx >= 0 ? (vals[iWx] || "").trim() : "",
+        education: iEdu >= 0 ? (vals[iEdu] || "").trim() : "",
+      });
+    }
+    communityPersonasCache = rows;
+    communityPersonasCacheMtimeMs = st.mtimeMs;
+    return rows;
+  } catch {
+    communityPersonasCache = [];
+    communityPersonasCacheMtimeMs = null;
+    return communityPersonasCache;
+  }
+}
+
+function tokenizeForCommunityRosterMatch(parts) {
+  const bag = new Set();
+  for (const p of parts) {
+    const words = String(p || "")
+      .toLowerCase()
+      .match(/[a-z0-9]{2,}/g) || [];
+    for (const w of words) {
+      if (w.length >= 3 && !COMMUNITY_QUERY_STOPWORDS.has(w)) bag.add(w);
+    }
+  }
+  return [...bag];
+}
+
+function communityRosterRowHaystack(row) {
+  return [row.occupation, row.workExperience, row.education].filter(Boolean).join(" ").toLowerCase();
+}
+
+function scoreCommunityRosterRow(row, queryTokens) {
+  const hay = communityRosterRowHaystack(row);
+  const hayTok = new Set(hay.match(/[a-z0-9]{2,}/g) || []);
+  let s = 0;
+  for (const t of queryTokens) {
+    if (hayTok.has(t)) s += 2;
+    else if (t.length >= 4 && hay.includes(t)) s += 1;
+  }
+  return s;
+}
+
+function isCommunityRosterNameExcluded(name, excludeList) {
+  const n = String(name || "").trim().toLowerCase();
+  if (!n) return true;
+  return excludeList.some((ex) => {
+    const first = String(ex || "")
+      .split("|")[0]
+      .trim()
+      .toLowerCase();
+    return Boolean(first && first === n);
+  });
+}
+
+function buildLocalExpertExcludeBlock(excludeList) {
+  if (!excludeList.length) return "";
+  return `
+
+CRITICAL — Do NOT suggest anyone or any organization listed below (already shown). Pick a clearly different person, program, or organization:
+
+${excludeList.map((e) => `- ${e}`).join("\n")}`;
+}
+
+async function geminiSchoolCommunityProfileFromCsvRow(ai, row, ctx) {
+  const nameLit = JSON.stringify(row.name);
+  const prompt = `You are helping a product DEMO for grades 3–8 project-based learning (PBL). The roster row is a fictional stand-in for a **school-community** connection (parents, volunteers, approved partners)—not unsupervised internet contacts.
+
+Expand into ONE council profile. Keep the given demographics accurate; add classroom-safe background and how they could help teams with the project theme. No stereotypes, graphic content, or claims about real private people.
+
+Roster row:
+- Name: ${row.name}
+- Age: ${row.age || "(unspecified)"}
+- Gender: ${row.gender || "(unspecified)"}
+- Occupation: ${row.occupation}
+- Work experience: ${row.workExperience}
+- Education: ${row.education}
+
+Project title: ${ctx.projectTitle || "(not specified)"}
+Essential question: ${ctx.essentialQuestion || "(not specified)"}
+Project summary: ${ctx.projectSummary || "(not specified)"}
+Council seat / advisor role: ${ctx.roleTitle || "(not specified)"}
+Approximate educator locale (optional flavor only): ${ctx.locationStr}
+
+${ctx.excludeBlock || ""}
+
+Reply with ONLY valid JSON (no markdown). Keys: name, organization, title, contact, imageUrl.
+- name must be exactly ${nameLit}.
+- organization: short label (fictional school name and/or "school family & community" framing).
+- title: one line combining occupation with a project-relevant angle.
+- contact: 2–4 sentences, DEMO only—teacher or office coordinates introductions; no real personal emails/phones; involve an adult.
+- imageUrl: "" (empty string).`;
+  const text = await geminiGenerateText(ai, prompt);
+  return parseJsonFromModelText(text);
+}
+
+async function geminiSchoolCommunitySyntheticPersona(ai, ctx) {
+  const prompt = `You are generating ONE fictional-but-plausible **school-community** member for a grades 3–8 PBL product DEMO. They must be someone a school could realistically introduce (parent, caregiver, alum, volunteer, or vetted local partner)—**not** someone students should message on the internet without adults.
+
+No real private individuals and no real personal contact details. Keep everything classroom-safe and age-appropriate.
+
+Approximate educator locale (optional naming flavor only): ${ctx.locationStr}
+${ctx.excludeBlock || ""}
+
+Project title: ${ctx.projectTitle || "(not specified)"}
+Essential question: ${ctx.essentialQuestion || "(not specified)"}
+Project summary: ${ctx.projectSummary || "(not specified)"}
+Council seat / advisor role: ${ctx.roleTitle || "(not specified)"}
+
+Reply with ONLY valid JSON (no markdown):
+{"name":"string — plausible full name","organization":"string — fictional school/community framing","title":"string — role + project-relevant lens","contact":"string — DEMO only: teacher-mediated outreach; verify with an adult","imageUrl":""}
+
+imageUrl must be "".`;
+  const text = await geminiGenerateText(ai, prompt);
+  return parseJsonFromModelText(text);
+}
+
+async function resolveK8SchoolCommunityLocalExpert(ai, ctx) {
+  const rows = loadCommunityPersonaRows();
+  const queryTokens = tokenizeForCommunityRosterMatch([
+    ctx.projectTitle,
+    ctx.projectSummary,
+    ctx.essentialQuestion,
+    ctx.roleTitle,
+  ]);
+
+  let bestRow = null;
+  let bestScore = 0;
+  for (const row of rows) {
+    if (isCommunityRosterNameExcluded(row.name, ctx.excludeList)) continue;
+    const sc = scoreCommunityRosterRow(row, queryTokens);
+    if (sc > bestScore) {
+      bestScore = sc;
+      bestRow = row;
+    }
+  }
+
+  if (bestRow && bestScore >= COMMUNITY_ROSTER_MATCH_MIN_SCORE) {
+    const parsed = await geminiSchoolCommunityProfileFromCsvRow(ai, bestRow, ctx);
+    if (parsed && typeof parsed === "object") {
+      parsed.name = bestRow.name;
+      const org = typeof parsed.organization === "string" ? parsed.organization.trim() : "";
+      const title = typeof parsed.title === "string" ? parsed.title.trim() : "";
+      const contact = typeof parsed.contact === "string" ? parsed.contact.trim() : "";
+      if (org || title || contact) return parsed;
+    }
+  }
+
+  return geminiSchoolCommunitySyntheticPersona(ai, ctx);
+}
+
 app.post("/api/creator/local-expert", async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
   }
-  const { roleTitle = "", projectTitle = "", projectSummary = "", essentialQuestion = "", excludeExperts = [] } = req.body || {};
+  const {
+    roleTitle = "",
+    projectTitle = "",
+    projectSummary = "",
+    essentialQuestion = "",
+    excludeExperts = [],
+    gradeLevel: gradeLevelRaw,
+  } = req.body || {};
+  const gradeLevelNorm = normalizeCouncilGradeLevel(gradeLevelRaw);
+  const useK8CommunityRoster = gradeLevelNorm === "3-5" || gradeLevelNorm === "6-8";
+
   const excludeList = Array.isArray(excludeExperts)
     ? excludeExperts
         .filter((e) => typeof e === "string" && e.trim())
         .map((e) => e.trim())
         .slice(0, 40)
     : [];
-  const excludeBlock = excludeList.length
-    ? `
-
-CRITICAL — Do NOT suggest anyone or any organization listed below (already shown). Pick a clearly different person, program, or organization:
-
-${excludeList.map((e) => `- ${e}`).join("\n")}`
-    : "";
+  const excludeBlock = buildLocalExpertExcludeBlock(excludeList);
   const locationStr = await getLocationFromRequest(req);
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const prompt = `The educator's approximate location (from **IP-based geolocation** of their browser request—city/region/country when available) is: ${locationStr}.
+  const geoExpertPrompt = `The educator's approximate location (from **IP-based geolocation** of their browser request—city/region/country when available) is: ${locationStr}.
 
 Suggest ONE real-world contact for students that fits the **council role** and project below. Follow this priority:
 
@@ -1698,14 +2002,29 @@ Reply with ONLY valid JSON (no markdown):
 
 For imageUrl: use an empty string unless you are confident in a direct https URL to an official photo or logo image from that organization; do not invent URLs. (The server may still derive an image from the website URL in contact when imageUrl is empty.)`;
   try {
-    const text = await geminiGenerateText(ai, prompt);
-    const parsed = parseJsonFromModelText(text);
+    let parsed;
+    let parseDebugText = "";
+    if (useK8CommunityRoster) {
+      parsed = await resolveK8SchoolCommunityLocalExpert(ai, {
+        projectTitle,
+        projectSummary,
+        essentialQuestion,
+        roleTitle,
+        excludeList,
+        excludeBlock,
+        locationStr,
+      });
+    } else {
+      const text = await geminiGenerateText(ai, geoExpertPrompt);
+      parseDebugText = text;
+      parsed = parseJsonFromModelText(text);
+    }
     const name = parsed?.name || parsed?.displayName;
     if (!name || typeof name !== "string" || !name.trim()) {
-      return res.status(422).json({ error: "Could not parse expert.", raw: text.slice(0, 500) });
+      return res.status(422).json({ error: "Could not parse expert.", raw: parseDebugText.slice(0, 500) });
     }
     let imageUrl = typeof parsed.imageUrl === "string" ? parsed.imageUrl.trim() : "";
-    if (!/^https?:\/\//i.test(imageUrl)) {
+    if (!useK8CommunityRoster && !/^https?:\/\//i.test(imageUrl)) {
       try {
         const fromSite = await pickImageFromContactWebsite(
           typeof parsed.contact === "string" ? parsed.contact.trim() : ""
@@ -1722,6 +2041,7 @@ For imageUrl: use an empty string unless you are confident in a direct https URL
       contact: typeof parsed.contact === "string" ? parsed.contact.trim() : "",
       imageUrl,
       regionHint: locationStr,
+      schoolCommunityRoster: useK8CommunityRoster,
     });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
