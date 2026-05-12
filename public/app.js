@@ -365,6 +365,31 @@ function chatPayload(body) {
   return body;
 }
 
+function councilPromptMaxChars(project) {
+  const g = String(project?.gradeLevel ?? "6-8").trim();
+  return g === "Uni+" ? 288 : 144;
+}
+
+function applyCouncilPromptCharLimits() {
+  if (APP_KIND !== "custom" || !customCouncilProject) return;
+  const max = councilPromptMaxChars(customCouncilProject);
+  if (promptInput) {
+    promptInput.maxLength = max;
+    promptInput.setAttribute("maxlength", String(max));
+    if (promptInput.value.length > max) promptInput.value = promptInput.value.slice(0, max);
+  }
+  if (followUpInput) {
+    followUpInput.maxLength = max;
+    followUpInput.setAttribute("maxlength", String(max));
+    if (followUpInput.value.length > max) followUpInput.value = followUpInput.value.slice(0, max);
+  }
+  const hint = document.getElementById("promptCharHint");
+  if (hint) {
+    hint.hidden = false;
+    hint.textContent = `Student questions are limited to ${max} characters at this grade level.`;
+  }
+}
+
 function getCustomMember(gemId) {
   return customCouncilProject?.members?.find((m) => Number(m.id) === Number(gemId));
 }
@@ -2209,6 +2234,7 @@ async function loadGems() {
     syncPhaseMilestoneTitle();
     setSubmitState();
     if (viewRubricCouncilBtn) viewRubricCouncilBtn.hidden = false;
+    applyCouncilPromptCharLimits();
     return;
   }
 

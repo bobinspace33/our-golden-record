@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import WordExtractor from "word-extractor";
 import express from "express";
 import cors from "cors";
 import { GoogleGenAI, createUserContent, createPartFromBase64 } from "@google/genai";
@@ -387,6 +388,110 @@ function orderCouncilPeersForLanes(peers) {
   return [...(peers || [])].filter(Boolean).sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+function normalizeCouncilGradeLevel(raw) {
+  const s = String(raw ?? "").trim();
+  if (s === "3-5" || s === "6-8" || s === "HS" || s === "Uni+") return s;
+  return "6-8";
+}
+
+function councilUserPromptCharLimit(gradeLevel) {
+  return normalizeCouncilGradeLevel(gradeLevel) === "Uni+" ? 288 : 144;
+}
+
+function buildOpenAiChatGlobalEducationGuidance(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  const stayOnTopic =
+    "Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas with questions, never shame the learner. **Stay strictly on-topic** for the learner's project question; do not drift into unrelated subjects.";
+
+  if (g === "3-5" || g === "6-8") {
+    return `[Educational product — global rules for every reply]
+You are part of an AI council inside a **school project-based learning (PBL) tool**. Every answer must support teaching and learning in a classroom setting.
+
+Audience (non-negotiable): **You are talking to a sixth-grade student** (about ages 11–12). Write as if speaking directly to them: clear everyday vocabulary, short sentences when possible, concrete examples, and zero condescension. Do not assume adult life experience; explain specialized terms briefly when you must use them.
+
+${stayOnTopic}
+
+Safety and boundaries for minors: no sexual content; no instructions for weapons, drugs, self-harm, or illegal acts; no harassment or harsh insults. Do not encourage plagiarism or doing graded work for them—guide with prompts and scaffolds instead. Do not claim to know private facts about the student or their family.
+
+You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).
+
+When several advisors answer the same student message in one round, each reply must be unmistakably different: varied framing, emphasis, and closing “follow up” suggestion—never copied templates or near-identical paragraphs across voices.`;
+  }
+
+  if (g === "HS") {
+    return `[Educational product — global rules for every reply]
+You are part of an AI council inside a **school project-based learning (PBL) tool**. Every answer must support teaching and learning in a classroom setting.
+
+Audience: **High school students.** Use vocabulary and sentence structure appropriate for roughly **9th-grade reading level**—clear but more nuanced than middle school; use discipline-specific terms when you briefly define or contextualize them.
+
+${stayOnTopic}
+
+Safety and boundaries: no sexual content; no instructions for weapons, drugs, self-harm, or illegal acts; no harassment. Do not encourage plagiarism or completing graded work for them—guide with questions and scaffolds. Do not claim private facts about the student.
+
+Serious topics may be addressed in a factual, classroom-appropriate way without graphic detail.
+
+When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.`;
+  }
+
+  return `[Educational product — global rules for every reply]
+You are part of an AI council inside a **project-based learning (PBL) tool** used in **college or advanced instructional contexts**. Every answer must support teaching and learning.
+
+Audience: **University-level or advanced learners.** You may use richer conceptual vocabulary and denser reasoning appropriate to roughly **grade-12 / upper-secondary Lexile complexity** (and collegiate discourse where it aids clarity)—remain precise and respectful, not pretentious.
+
+${stayOnTopic}
+
+Safety and boundaries: no illegal instructions; no sexual content targeted at minors; no harassment; no enabling self-harm. Do not encourage academic dishonesty—coach understanding rather than supplying graded deliverables. Do not fabricate private facts about individuals.
+
+When several advisors answer the same student message in one round, each reply must be clearly distinct in framing and emphasis—never copied templates across voices.`;
+}
+
+function customCouncilLexileTailInstruction(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  if (g === "3-5" || g === "6-8") {
+    return `Keep responses at roughly **grade 6 Lexile level** when appropriate (clear, concrete language matching upper-elementary / middle school expectations).`;
+  }
+  if (g === "HS") {
+    return `Calibrate language and explanations for roughly **9th-grade reading level**—more analytical than middle school, still accessible.`;
+  }
+  return `You may use **grade-12 / upper-secondary Lexile complexity** and richer disciplinary nuance appropriate for university-level learners; stay clear and well structured.`;
+}
+
+function geminiSuggestMembersToneBullet(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  if (g === "3-5" || g === "6-8") {
+    return `- Tone: supportive coach for grades 6–8; mostly questions and prompts rather than lectures; avoid repeating boilerplate across members.`;
+  }
+  if (g === "HS") {
+    return `- Tone: supportive coach for **high school** students; language near **9th-grade reading level**; mostly questions and prompts rather than lectures; avoid repeating boilerplate across members.`;
+  }
+  return `- Tone: supportive mentor for **university / advanced** learners; language may reach roughly **grade-12 Lexile complexity** where helpful; probing questions over lectures; avoid repeating boilerplate across members.`;
+}
+
+function rubricAudienceDescriptorForGrade(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  if (g === "3-5" || g === "6-8") return "upper-elementary through middle-grades (about grades 3–8)";
+  if (g === "HS") return "high school (about grades 9–12)";
+  return "advanced learners including university students";
+}
+
+function preLaunchTeacherGradeLine(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  const map = {
+    "3-5": "Grades 3–5 (elementary)",
+    "6-8": "Grades 6–8 (middle school)",
+    HS: "High school",
+    "Uni+": "University / advanced",
+  };
+  return map[g];
+}
+
+function peerUnsurePhrase(gradeLevel) {
+  const g = normalizeCouncilGradeLevel(gradeLevel);
+  if (g === "Uni+") return "say so clearly.";
+  if (g === "HS") return "say so plainly.";
+  return "say so honestly (kid-friendly).";
+}
+
 function buildFollowUpCommunityInstruction(locationStr, orderedPeers, currentGem) {
   const lanes = COUNCIL_FOLLOW_UP_LANES;
   const idx = orderedPeers.findIndex((p) => p && Number(p.id) === Number(currentGem.id));
@@ -407,7 +512,8 @@ function buildFollowUpCommunityInstruction(locationStr, orderedPeers, currentGem
  * Nudge models away from repeating sibling personas answering the same prompt.
  * @param {Array<{ id: unknown, name?: string, systemInstruction?: string }>} peers
  */
-function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn) {
+function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn, gradeLevel) {
+  const unsure = peerUnsurePhrase(gradeLevel);
   const cid = Number(currentId);
   const self = peers.find((x) => x && Number(x.id) === cid);
   const others = peers.filter((x) => x && Number(x.id) !== cid);
@@ -415,7 +521,7 @@ function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn) {
   const selfTitle = self ? jobTitleFn(self) || "Advisor" : "Advisor";
 
   if (!others.length) {
-    return `\n\n[Council context]\nYou are **${selfName}** (${selfTitle}), the only advisor answering this round. Stay clearly inside that specialty: foreground checks, examples, and vocabulary that role would use first—not generic advice every subject could give.\nIf the question is outside your expertise, say so honestly (kid-friendly). Name another council role or a **type** of local expert who would know more, or suggest how an adult could help them find the right person.\n`;
+    return `\n\n[Council context]\nYou are **${selfName}** (${selfTitle}), the only advisor answering this round. Stay clearly inside that specialty: foreground checks, examples, and vocabulary that role would use first—not generic advice every subject could give.\nIf the question is outside your expertise, ${unsure} Name another council role or a **type** of local expert who would know more, or suggest how an adult could help them find the right person.\n`;
   }
 
   const lines = others.map((g) => {
@@ -453,25 +559,9 @@ async function openAiEnsureDocFileId(client, relativePath) {
   return pending;
 }
 
-/**
- * Prepended to every OpenAI council completion. Educational context + fixed child-aware audience.
- * Single choke point for `/api/chat` and `/api/chat/custom`.
- */
-const OPEN_AI_CHAT_GLOBAL_EDUCATION_GUIDANCE = `[Educational product — global rules for every reply]
-You are part of an AI council inside a **school project-based learning (PBL) tool**. Every answer must support teaching and learning in a classroom setting.
-
-Audience (non-negotiable): **You are talking to a sixth-grade student** (about ages 11–12). Write as if speaking directly to them: clear everyday vocabulary, short sentences when possible, concrete examples, and zero condescension. Do not assume adult life experience; explain specialized terms briefly when you must use them.
-
-Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas with questions, never shame the learner. Stay on-topic for the student’s project question.
-
-Safety and boundaries for minors: no sexual content; no instructions for weapons, drugs, self-harm, or illegal acts; no harassment or harsh insults. Do not encourage plagiarism or doing graded work for them—guide with prompts and scaffolds instead. Do not claim to know private facts about the student or their family.
-
-You may mention serious real-world topics only in an age-appropriate, classroom-safe way (brief, factual, hopeful or constructive—never graphic).
-
-When several advisors answer the same student message in one round, each reply must be unmistakably different: varied framing, emphasis, and closing “follow up” suggestion—never copied templates or near-identical paragraphs across voices.`;
-
-async function openAiCompleteCouncilTurn(client, { instructions, userContentParts }) {
-  const mergedInstructions = [OPEN_AI_CHAT_GLOBAL_EDUCATION_GUIDANCE, instructions].filter(Boolean).join("\n\n");
+async function openAiCompleteCouncilTurn(client, { instructions, userContentParts, gradeLevel }) {
+  const globalBlock = buildOpenAiChatGlobalEducationGuidance(gradeLevel ?? "6-8");
+  const mergedInstructions = [globalBlock, instructions].filter(Boolean).join("\n\n");
   const response = await client.responses.create({
     model: OPENAI_CHAT_MODEL,
     instructions: mergedInstructions || undefined,
@@ -909,7 +999,10 @@ app.post("/api/creator/pre-launch-reflection", async (req, res) => {
     essentialQuestion = "",
     objectives = [],
     supportingAttachments = [],
+    gradeLevel: gradeLevelRaw = "",
   } = req.body || {};
+  const gradeLevelNorm = normalizeCouncilGradeLevel(gradeLevelRaw);
+  const gradeBandNote = `Teacher-selected student grade band: ${preLaunchTeacherGradeLine(gradeLevelNorm)} (use when adapting “Reflect on your students” and related prompts).\n`;
 
   const objClean = Array.isArray(objectives)
     ? objectives.map((o) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean)
@@ -955,7 +1048,7 @@ How to use them:
 
   const userPrompt = `You support teachers planning project-based learning (PBL).
 
-${exemplarNote}Project title: ${projectTitle || "(not specified)"}
+${exemplarNote}${gradeBandNote}Project title: ${projectTitle || "(not specified)"}
 Essential question: ${essentialQuestion || "(not specified)"}
 Summary / excerpt: ${projectSummary || "(not specified)"}
 Learning objectives: ${objClean.join("; ") || "(not specified)"}
@@ -1024,7 +1117,10 @@ app.post("/api/creator/suggest-members", async (req, res) => {
     objectives = [],
     phases = [],
     memberCount = 4,
+    gradeLevel: suggestMembersGradeRaw = "",
   } = req.body || {};
+  const suggestMembersGrade = normalizeCouncilGradeLevel(suggestMembersGradeRaw);
+  const toneBullet = geminiSuggestMembersToneBullet(suggestMembersGrade);
   const count = Math.min(6, Math.max(2, Number(memberCount) || 4));
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const phaseLinesArray = Array.isArray(phases) ? phases : [];
@@ -1057,7 +1153,7 @@ Requirements for ALL ${count} members:
 - Give each member a **different "thinking fingerprint"**: one might lean on measurement and constraints; another on ethics and who benefits; another on oral history and narrative; another on prototyping and testing; another on policy or institutional partnerships—assign explicitly in the text so voices cannot collapse into the same advice.
 - Each systemInstruction must be **140–320 words** and structured as plain prose with ALL of: (1) **Background**: 1–2 sentences of plausible lived/work experience (specific institutions, regions, or communities types—not vague "many years"). (2) **Expertise**: two narrow specialties written as noun phrases (not single generic labels like "science"). (3) **What they push students to notice**: typical blind spots or tensions only their lens surfaces. (4) **Signature move**: one repeatable coaching habit (e.g. always asks for evidence sources, always asks whose voice is missing, always asks for a cheap prototype). (5) **Anti-pattern**: one thing this advisor refuses to do (e.g. won't pick topics for the team, won't praise without a probing question).
 - **Anti-repetition (critical):** Members must NOT share the same opening hooks, moral-of-the-story framings, clichés ("think critically", "dig deeper" without a prompt), or identical question stems. If two answers could start with the same sentence, rewrite until they diverge.
-- Tone: supportive coach for grades 6–8; mostly questions and prompts rather than lectures; avoid repeating boilerplate across members.
+${toneBullet}
 - Roles must complement each other (collectively cover the project) and align with the phases and objectives above.
 
 Reply with ONLY valid JSON. Each member object must fully satisfy the systemInstruction rules above (length, structure, anti-repetition).
@@ -1111,7 +1207,10 @@ app.post("/api/creator/regenerate-member", async (req, res) => {
     phases = [],
     existingNames = [],
     otherMembers = [],
+    gradeLevel: regenGradeRaw = "",
   } = req.body || {};
+  const regenGrade = normalizeCouncilGradeLevel(regenGradeRaw);
+  const regenTone = geminiSuggestMembersToneBullet(regenGrade).replace(/^- Tone: /, "");
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const avoid = Array.isArray(existingNames) ? existingNames.filter(Boolean).join(", ") : "";
   const phaseLinesArray = Array.isArray(phases) ? phases : [];
@@ -1158,6 +1257,8 @@ Reply with ONLY valid JSON:
 {"name":"string","jobTitle":"string","systemInstruction":"string","portraitGender":"female"|"male"|"neutral"${phaseCount > 0 ? `,"phasesEnabled":[${Array(phaseCount).fill("true").join(",")}]` : ""}}
 
 systemInstruction must be 140–320 words and include: specific background; two narrow expertise phrases; blind spots students miss from this lens; one signature coaching habit; one explicit anti-pattern (what they refuse to do). No generic filler repeated from typical PBL templates.
+
+Voice calibration for this project: ${regenTone}
 
 Include "phasesEnabled" only when ${phaseCount} > 0: exactly ${phaseCount} booleans in phase order (true where this new role helps students in that phase, false where not needed). At least one true.
 
@@ -1553,11 +1654,23 @@ function normalizeBriefMimeType(fileName, mimeType) {
   if (m && m !== "application/octet-stream") return mimeType;
   const n = (fileName || "").toLowerCase();
   if (n.endsWith(".pdf")) return "application/pdf";
+  if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (n.endsWith(".doc")) return "application/msword";
   if (n.endsWith(".md")) return "text/markdown";
   if (n.endsWith(".txt")) return "text/plain";
   if (n.endsWith(".html") || n.endsWith(".htm")) return "text/html";
   if (n.endsWith(".csv")) return "text/csv";
   return mimeType || "application/pdf";
+}
+
+const MAX_BRIEF_EXTRACTED_TEXT_CHARS = 120_000;
+
+/** @param {Buffer} buffer */
+async function extractWordBriefPlainText(buffer) {
+  const extractor = new WordExtractor();
+  const doc = await extractor.extract(buffer);
+  const body = doc.getBody();
+  return String(body || "").trim();
 }
 
 app.post("/api/creator/analyze-brief", async (req, res) => {
@@ -1572,7 +1685,36 @@ app.post("/api/creator/analyze-brief", async (req, res) => {
 
   const name = brief?.name || "brief";
   const mimeType = normalizeBriefMimeType(name, brief?.mimeType);
-  const lowerMime = mimeType.toLowerCase();
+  const lowerName = (name || "").toLowerCase();
+  const mimeLower = mimeType.toLowerCase();
+  const looksDocx =
+    lowerName.endsWith(".docx") ||
+    mimeLower.includes("wordprocessingml") ||
+    mimeLower.includes("vnd.openxmlformats-officedocument.wordprocessingml");
+  const looksDoc = (lowerName.endsWith(".doc") || mimeLower.includes("msword")) && !looksDocx;
+
+  let payloadData = data;
+  let payloadMime = mimeType;
+
+  if (looksDocx || looksDoc) {
+    try {
+      const buf = Buffer.from(data, "base64");
+      const plain = await extractWordBriefPlainText(buf);
+      if (!plain) {
+        return res.status(422).json({
+          error:
+            "Could not extract readable text from the Word document. Try exporting as PDF or paste a summary below.",
+        });
+      }
+      const clipped = plain.length > MAX_BRIEF_EXTRACTED_TEXT_CHARS ? plain.slice(0, MAX_BRIEF_EXTRACTED_TEXT_CHARS) : plain;
+      payloadData = Buffer.from(clipped, "utf8").toString("base64");
+      payloadMime = "text/plain";
+    } catch (e) {
+      return res.status(400).json({ error: e?.message || "Could not read Word document." });
+    }
+  }
+
+  const lowerMime = payloadMime.toLowerCase();
   const ok =
     lowerMime.includes("pdf") ||
     lowerMime.includes("text") ||
@@ -1580,7 +1722,7 @@ app.post("/api/creator/analyze-brief", async (req, res) => {
     lowerMime.includes("html") ||
     lowerMime.includes("csv");
   if (!ok) {
-    return res.status(400).json({ error: "Unsupported brief type. Use PDF, TXT, MD, or HTML." });
+    return res.status(400).json({ error: "Unsupported brief type. Use PDF, Word (.doc / .docx), TXT, MD, or HTML." });
   }
 
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
@@ -1596,17 +1738,20 @@ Extract:
 2) **essentialQuestion**: The unit’s essential question or driving question that frames student work—the “big” question students keep returning to. In **PBL Works**–style briefs, this is often the question under **Project Launch** (sometimes near **Entry Event** or **Challenging Problem**). Copy it verbatim when possible; otherwise summarize in one sentence. Use JSON null only if no such question appears (do not invent one).
 
 3) **objectives**: An array of 2–6 learning objectives as clear, student-facing sentences. Use this priority:
-   - Explicit learning objectives, outcomes, or standards bullets if listed
+   - **Section headings:** First use bullets or numbered items under headings such as **Learning Objectives**, **Learning Goals**, **Goal(s)**, **Learning Outcomes**, **Outcome(s)**, **Student Learning Outcomes**, **SLOs**, **Competencies**, **Standards addressed**, or clearly equivalent wording—even when there is no heading that literally says “Learning Objectives.”
+   - Then other explicit learning objectives, outcomes, or standards bullets elsewhere in the document
    - For PBL Works–style or similar briefs: treat questions, prompts, or bullets under sections such as **Build Knowledge**, **Develop & Critique**, **Need to Know**, **Sustained Inquiry**, or **Challenging Problem** as source material—rewrite each into one concise objective
    - Otherwise infer objectives from stated outcomes elsewhere in the document
+
+4) **gradeLevel**: If the brief clearly states **student grade band / level / audience**, return exactly one of: **"3-5"** (elementary primary/intermediate, ~grades 3–5), **"6-8"** (middle grades), **"HS"** (high school), **"Uni+"** (college/university/adult/professional learners). Map synonyms (e.g. "middle school"→"6-8", "freshmen"/"9th"→"HS", "undergraduate"→"Uni+"). Use JSON **null** if unclear or not stated.
 
 Strings must not contain raw newlines; use spaces. Escape double quotes inside strings.
 
 Reply with ONLY valid JSON:
-{"title":"string or null","essentialQuestion":"string or null","objectives":["..."]}`;
+{"title":"string or null","essentialQuestion":"string or null","objectives":["..."],"gradeLevel":"3-5"|"6-8"|"HS"|"Uni+"|null}`;
 
   try {
-    const filePart = createPartFromBase64(data, mimeType);
+    const filePart = createPartFromBase64(payloadData, payloadMime);
     const contents = createUserContent([filePart, userPrompt]);
     const models = chatModelCandidates("gemini-2.5-flash");
     const response = await geminiGenerateContentWithModelFallback(ai, models, {
@@ -1639,7 +1784,15 @@ Reply with ONLY valid JSON:
       essentialQuestion = essentialQuestion.slice(0, 497) + "…";
     }
 
-    res.json({ title, essentialQuestion, objectives });
+    const allowedGrade = new Set(["3-5", "6-8", "HS", "Uni+"]);
+    let gradeLevel = null;
+    const glRaw = parsed.gradeLevel;
+    if (glRaw != null && glRaw !== "") {
+      const gs = String(glRaw).trim();
+      if (allowedGrade.has(gs)) gradeLevel = gs;
+    }
+
+    res.json({ title, essentialQuestion, objectives, gradeLevel });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -1656,7 +1809,10 @@ app.post("/api/creator/rubric-specs", async (req, res) => {
     objectives = [],
     learningObjectives = [],
     phases = [],
+    gradeLevel: rubricGradeRaw = "",
   } = req.body || {};
+  const rubricGrade = normalizeCouncilGradeLevel(rubricGradeRaw);
+  const rubricAudience = rubricAudienceDescriptorForGrade(rubricGrade);
 
   const obj = [...(Array.isArray(learningObjectives) ? learningObjectives : []), ...(Array.isArray(objectives) ? objectives : [])]
     .map((s) => String(s || "").trim())
@@ -1675,7 +1831,7 @@ app.post("/api/creator/rubric-specs", async (req, res) => {
   const phaseLines = usable.map((p) => `Phase ${p.index + 1} — ${p.title || "(untitled)"}: ${p.description || "(no description)"}`).join("\n");
 
   const systemInstruction =
-    "You write assessment rubrics for grades 6–8 project-based learning. Reply with only valid JSON, no markdown fences.";
+    `You write assessment rubrics for ${rubricAudience} project-based learning. Reply with only valid JSON, no markdown fences.`;
 
   const prompt = `You are building milestone rubrics for a PBL unit. The school uses PBLworks-style performance columns (four levels) aligned with these rubric **families** (reference their spirit; do not claim to quote copyrighted text): ${anchors.join(", ")}.
 
@@ -1889,6 +2045,7 @@ app.post("/api/chat/custom", async (req, res) => {
   if (!members.length) {
     return res.status(400).json({ error: "Invalid council project." });
   }
+  const gradeLevelNorm = normalizeCouncilGradeLevel(councilProject?.gradeLevel);
   if (!Array.isArray(selectedGems) || selectedGems.length === 0) {
     return res.status(400).json({ error: "Select at least one council member." });
   }
@@ -1897,6 +2054,13 @@ app.post("/api/chat/custom", async (req, res) => {
   const hasAttachments = Array.isArray(rawAttachments) && rawAttachments.length > 0;
   if (!promptText && !hasAttachments) {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
+  }
+
+  const maxPromptChars = councilUserPromptCharLimit(gradeLevelNorm);
+  if (!opinionOnResponse && promptText.length > maxPromptChars) {
+    return res.status(400).json({
+      error: `Your question must be ${maxPromptChars} characters or fewer at this grade level (currently ${promptText.length}).`,
+    });
   }
 
   let coreUserPrompt = promptText || "(The user sent the following files with no additional text.)";
@@ -1959,15 +2123,19 @@ app.post("/api/chat/custom", async (req, res) => {
           ...attachmentContentParts,
           { type: "input_text", text: projectContext + "\n" + coreUserPrompt + followInstr },
         ];
-        const peerBlock = buildOpenAiPeerDifferentiationBlock(toRun, gem.id, (g) =>
-          typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"
+        const peerBlock = buildOpenAiPeerDifferentiationBlock(
+          toRun,
+          gem.id,
+          (g) => (typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"),
+          gradeLevelNorm
         );
         const jt = typeof gem.jobTitle === "string" && gem.jobTitle.trim() ? gem.jobTitle.trim() : "Advisor";
+        const lexTail = customCouncilLexileTailInstruction(gradeLevelNorm);
         const instructions =
           (gem.systemInstruction || "") +
           peerBlock +
-          `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\nKeep responses at a grade 6 Lexile level when appropriate. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
-        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
+          `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
+        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts, gradeLevel: gradeLevelNorm });
         results.push({
           gemId: gem.id,
           name: gem.name,
@@ -2060,14 +2228,15 @@ app.post("/api/chat", async (req, res) => {
         for (const p of attachmentContentParts) userContentParts.push(p);
         userContentParts.push({ type: "input_text", text: coreUserPrompt + followInstr });
 
-        const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name);
+        const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name, "6-8");
         const jt = JOB_TITLES[gem.name] || gem.name;
+        const lexTail = customCouncilLexileTailInstruction("6-8");
         const instructions =
           (gem.systemInstruction || "") +
           peerBlock +
-          `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\nKeep all responses at a grade 6 Lexile level. Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
+          `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
 
-        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts });
+        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts, gradeLevel: "6-8" });
         results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
       } catch (err) {
         results.push({

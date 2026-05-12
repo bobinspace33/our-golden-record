@@ -18,7 +18,7 @@
 
     <header class="creator-header creator-header-row">
       <div class="creator-header-text">
-        <h1>Create New Council</h1>
+        <h1>Create New PBL Council</h1>
         <p class="tagline">Describe your PBL unit. The assistant will suggest phases and council roles you can refine.</p>
       </div>
       <button type="button" class="teacher-menu-btn" id="teacherMenuBtn" aria-label="Teacher menu" title="Teacher menu">
@@ -28,17 +28,26 @@
 
     <form id="creatorForm" class="creator-form" onsubmit="return false;">
       <section class="creator-block">
-        <label class="creator-label" for="projectTitle">Project title</label>
-        <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
-      </section>
-
-      <section class="creator-block">
-        <h2 class="creator-block-title">1. Project brief</h2>
-        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline (PDF or text). If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
+        <h2 class="creator-block-title">1. Project brief - START HERE!</h2>
+        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline (PDF, Word, or text). If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
         <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file. Upload a new file to replace it.</p>
-        <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,text/*" class="creator-file" />
+        <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*" class="creator-file" />
         <label class="creator-label" for="projectSummary">Summary for AI (paste key points if the file is large)</label>
         <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the project brief…"></textarea>
+        <label class="creator-label" for="projectTitle">Project title</label>
+        <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
+        <fieldset class="grade-level-fieldset">
+          <legend class="creator-label">Grade level</legend>
+          <p class="creator-hint grade-level-hint">
+            Sets how council members phrase advice and the character limit for student questions on the Council screen. Uploading a project brief may set this automatically when grade band appears in the document.
+          </p>
+          <div class="grade-level-options">
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="3-5" /> 3–5</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="6-8" checked /> 6–8</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="HS" /> HS</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="Uni+" /> Uni+</label>
+          </div>
+        </fieldset>
       </section>
 
       <section class="creator-block">
@@ -67,7 +76,7 @@
 
       <section class="creator-block">
         <h2 class="creator-block-title">4. Learning objectives</h2>
-        <p class="creator-hint">2–4 objectives recommended. Uploading a project brief can auto-fill objectives.”</p>
+        <p class="creator-hint">2–4 objectives recommended. Uploading a project brief can auto-fill objectives.</p>
         <div id="objectivesList" class="objectives-list"></div>
         <button type="button" class="btn-add-row" id="addObjectiveBtn">+ Add objective</button>
       </section>

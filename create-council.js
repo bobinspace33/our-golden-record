@@ -84,6 +84,21 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+const ALLOWED_GRADE_LEVELS = ["3-5", "6-8", "HS", "Uni+"];
+
+function getGradeLevelFromForm() {
+  const el = document.querySelector('input[name="gradeLevel"]:checked');
+  const v = el?.value;
+  return ALLOWED_GRADE_LEVELS.includes(v) ? v : "6-8";
+}
+
+function setGradeLevelOnForm(level) {
+  const v = ALLOWED_GRADE_LEVELS.includes(level) ? level : "6-8";
+  document.querySelectorAll('input[name="gradeLevel"]').forEach((inp) => {
+    inp.checked = inp.value === v;
+  });
+}
+
 /** Unisex / ambiguous given names → neutral portrait cues */
 const PORTRAIT_AMBIGUOUS_NAMES = new Set([
   "alex", "avery", "blair", "cameron", "casey", "corey", "devon", "drew", "ellis", "frankie",
@@ -708,6 +723,12 @@ function renderObjectives() {
   });
 }
 
+function fitPhaseDescTextarea(textarea) {
+  if (!textarea || textarea.tagName !== "TEXTAREA") return;
+  textarea.style.height = "auto";
+  textarea.style.height = `${Math.max(44, textarea.scrollHeight)}px`;
+}
+
 function renderPhases() {
   const grid = document.getElementById("phasesGrid");
   if (!grid) return;
@@ -718,8 +739,8 @@ function renderPhases() {
     <div class="phase-row">
       <span class="phase-num">${i + 1}</span>
       <button type="button" class="phase-delete-btn" data-phase-delete="${i}" aria-label="Delete phase ${i + 1}" title="Delete this phase"${canDelete ? "" : " disabled"}>×</button>
-      <input type="text" class="creator-input" data-phase-title="${i}" value="${escapeHtml(p.title)}" placeholder="Title" />
-      <input type="text" class="creator-input" data-phase-desc="${i}" value="${escapeHtml(p.description)}" placeholder="Description / deliverable" />
+      <input type="text" class="creator-input phase-title-input" data-phase-title="${i}" value="${escapeHtml(p.title)}" placeholder="Phase name" />
+      <textarea class="creator-textarea phase-desc-input" rows="2" data-phase-desc="${i}" placeholder="Phase description / deliverable">${escapeHtml(p.description)}</textarea>
     </div>`
     )
     .join("");
@@ -744,7 +765,11 @@ function renderPhases() {
     inp.addEventListener("input", () => {
       const i = Number(inp.dataset.phaseDesc);
       state.phases[i].description = inp.value;
+      fitPhaseDescTextarea(inp);
     });
+  });
+  requestAnimationFrame(() => {
+    grid.querySelectorAll("[data-phase-desc]").forEach((ta) => fitPhaseDescTextarea(ta));
   });
 }
 
@@ -961,6 +986,7 @@ async function suggestMembers() {
         objectives,
         phases: state.phases,
         memberCount: state.memberCount,
+        gradeLevel: getGradeLevelFromForm(),
       }),
     });
     const data = await res.json();
@@ -1030,6 +1056,7 @@ async function regenerateMember(idx) {
         phases: state.phases,
         existingNames,
         otherMembers,
+        gradeLevel: getGradeLevelFromForm(),
       }),
     });
     const data = await res.json();
@@ -1136,6 +1163,8 @@ function readFileAsBase64Payload(file) {
 function inferMimeFromFileName(name) {
   const n = (name || "").toLowerCase();
   if (n.endsWith(".pdf")) return "application/pdf";
+  if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (n.endsWith(".doc")) return "application/msword";
   if (n.endsWith(".md")) return "text/markdown";
   if (n.endsWith(".txt")) return "text/plain";
   if (n.endsWith(".html") || n.endsWith(".htm")) return "text/html";
@@ -1317,6 +1346,7 @@ function collectDraftSnapshot() {
     essentialQuestion,
     objectives: state.objectives.slice(),
     phases: state.phases.map((p) => ({ title: p.title || "", description: p.description || "" })),
+    gradeLevel: getGradeLevelFromForm(),
     members: state.members.map((m) => JSON.parse(JSON.stringify(m))),
     memberCount: state.memberCount,
     settings: { ...state.settings },
@@ -1370,6 +1400,7 @@ function applyDraftSnapshot(snapshot) {
     ...(snapshot.settings || {}),
   };
   if (!RUBRIC_CREATION_ENABLED) state.settings.buildRubricsOnLaunch = false;
+  setGradeLevelOnForm(snapshot.gradeLevel);
   if (Array.isArray(snapshot.supportingDocuments) && snapshot.supportingDocuments.length) {
     state.supportingDocuments = snapshot.supportingDocuments
       .map(normalizeSupportingDoc)
@@ -1535,7 +1566,7 @@ function rubricsCacheKeyFromForm() {
   const ph = phasesPayloadForApi()
     .map((p) => `${(p.title || "").trim()}\t${(p.description || "").trim()}`)
     .join(";;");
-  return [title, objectives, ph].join(":::");
+  return [title, objectives, ph, getGradeLevelFromForm()].join(":::");
 }
 
 async function fetchRubricSpecsFromForm() {
@@ -1558,6 +1589,7 @@ async function fetchRubricSpecsFromForm() {
       objectives: state.objectives.map((o) => o.trim()).filter(Boolean),
       learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
       phases,
+      gradeLevel: getGradeLevelFromForm(),
     }),
   });
   const data = await res.json().catch(() => ({}));
@@ -1576,7 +1608,7 @@ async function analyzeBriefFile(file) {
   setCreatorLoading(
     true,
     "Analyzing project brief…",
-    "Extracting the project title, essential question, and learning objectives from your document."
+    "Extracting the project title, essential question, learning objectives, and grade level when stated."
   );
   try {
     const payload = await readFileAsBase64Payload(file);
@@ -1606,6 +1638,11 @@ async function analyzeBriefFile(file) {
       state.objectives = data.objectives.slice();
       renderObjectives();
     }
+
+    const allowedGl = new Set(ALLOWED_GRADE_LEVELS);
+    if (data.gradeLevel && allowedGl.has(data.gradeLevel)) {
+      setGradeLevelOnForm(data.gradeLevel);
+    }
   } catch (e) {
     if (err) {
       err.textContent = e.message || String(e);
@@ -1622,7 +1659,8 @@ function reflectionCacheKeyForPreLaunch() {
   const eq = getEssentialQuestion();
   const objs = state.objectives.map((o) => o.trim()).filter(Boolean).join("|");
   const docs = state.supportingDocuments.map((d) => `${d.name}:${d.size}`).join("|");
-  return `${title}:::${summary}:::${eq}:::${objs}:::${docs}`;
+  const gl = getGradeLevelFromForm();
+  return `${title}:::${summary}:::${eq}:::${objs}:::${docs}:::${gl}`;
 }
 
 function fillPreLaunchModal(doc) {
@@ -1677,6 +1715,7 @@ async function fetchPreLaunchReflection(opts = {}) {
         essentialQuestion: getEssentialQuestion(),
         objectives: state.objectives.map((o) => o.trim()).filter(Boolean),
         supportingAttachments: payloadDocs,
+        gradeLevel: getGradeLevelFromForm(),
       }),
     });
     const data = await res.json();
@@ -1828,6 +1867,7 @@ async function runCouncilLaunchPipeline(id, title, err) {
       projectTitle: title,
       projectSummary: document.getElementById("projectSummary")?.value?.trim() || "",
       essentialQuestion: document.getElementById("essentialQuestion")?.value?.trim() || "",
+      gradeLevel: getGradeLevelFromForm(),
       learningObjectives: state.objectives.map((o) => o.trim()).filter(Boolean),
       phases: state.phases.filter((p) => (p.title || "").trim() || (p.description || "").trim()),
       members: state.members.map((m) => ({ ...m })),

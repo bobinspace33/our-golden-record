@@ -270,9 +270,38 @@
 
 .phase-row {
   display: grid;
-  grid-template-columns: auto auto minmax(6.5rem, 11rem) minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 0.5rem 0.75rem;
   align-items: start;
+}
+
+.phase-row .phase-num {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.phase-row .phase-delete-btn {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.phase-row .phase-title-input {
+  grid-column: 3;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+.phase-row .phase-desc-input {
+  grid-column: 3;
+  grid-row: 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  resize: vertical;
+  overflow-y: hidden;
+  field-sizing: content;
 }
 
 .phase-delete-btn {
@@ -303,28 +332,8 @@
 
 @media (max-width: 640px) {
   .phase-row {
-    grid-template-columns: auto auto 1fr;
+    grid-template-columns: auto auto minmax(0, 1fr);
     grid-template-rows: auto auto;
-  }
-
-  .phase-num {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .phase-delete-btn {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .phase-row [data-phase-title] {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
-  .phase-row [data-phase-desc] {
-    grid-column: 1 / -1;
-    grid-row: 2;
   }
 }
 
@@ -487,6 +496,51 @@ input.creator-file::file-selector-button:hover {
   flex-direction: column;
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.grade-level-fieldset {
+  border: none;
+  margin: 1.25rem 0 0;
+  padding: 0;
+}
+
+.grade-level-fieldset .creator-label {
+  margin-bottom: 0.35rem;
+}
+
+.grade-level-hint {
+  margin-top: 0;
+  margin-bottom: 0.65rem;
+}
+
+.grade-level-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.grade-level-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.grade-level-option:has(input:checked) {
+  border-color: var(--success);
+  background: rgba(52, 199, 89, 0.12);
+}
+
+.grade-level-option input {
+  margin: 0;
+  accent-color: var(--success);
 }
 
 .phase-num {
