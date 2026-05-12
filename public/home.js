@@ -30,8 +30,13 @@ function councilShareUrl(savedId) {
   return new URL(path, window.location.origin).href;
 }
 
-async function copyCouncilShareLink(savedId) {
-  const text = councilShareUrl(savedId);
+function draftEditShareUrl(draftId) {
+  const path = `/create.html?draft=${encodeURIComponent(draftId)}`;
+  return new URL(path, window.location.origin).href;
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) return false;
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -54,6 +59,40 @@ async function copyCouncilShareLink(savedId) {
   } catch {
     return false;
   }
+}
+
+async function copyCouncilShareLink(savedId) {
+  return copyTextToClipboard(councilShareUrl(savedId));
+}
+
+function attachShareIconButton(actions, { labelTitle, getUrl }) {
+  const share = document.createElement("button");
+  share.type = "button";
+  share.className = "project-list-icon-btn project-list-icon-share";
+  share.setAttribute("aria-label", `Copy link to ${labelTitle}`);
+  share.title = "Copy link to this council";
+  share.innerHTML = ICON_SHARE_SVG;
+  share.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const url = getUrl();
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      share.title = "Link copied!";
+      share.setAttribute("aria-label", "Link copied to clipboard");
+      setTimeout(() => {
+        share.title = "Copy link to this council";
+        share.setAttribute("aria-label", `Copy link to ${labelTitle}`);
+      }, 2000);
+    } else {
+      share.title = "Could not copy — try opening the council and copy the URL from the address bar.";
+      setTimeout(() => {
+        share.title = "Copy link to this council";
+      }, 3500);
+    }
+  });
+  actions.appendChild(share);
+  return share;
 }
 
 function loadDrafts() {
@@ -170,7 +209,18 @@ function render() {
         ${row.builtin ? `<span class="project-list-badge">Built-in</span>` : ""}
       `;
       if (row.builtin) {
-        li.appendChild(a);
+        const rowWrap = document.createElement("div");
+        rowWrap.className = "project-list-row";
+        const labelTitle = row.title || "this council";
+        const actions = document.createElement("div");
+        actions.className = "project-list-card-actions";
+        attachShareIconButton(actions, {
+          labelTitle,
+          getUrl: () => new URL(row.href || "/golden-record.html", window.location.origin).href,
+        });
+        rowWrap.appendChild(a);
+        rowWrap.appendChild(actions);
+        li.appendChild(rowWrap);
       } else {
         const rowWrap = document.createElement("div");
         rowWrap.className = "project-list-row";
@@ -180,27 +230,9 @@ function render() {
 
         actions.appendChild(createTeacherMenuRowButton({ kind: "saved", id: row.id }));
 
-        const share = document.createElement("button");
-        share.type = "button";
-        share.className = "project-list-icon-btn project-list-icon-share";
-        share.setAttribute("aria-label", `Copy link to ${labelTitle}`);
-        share.title = "Copy link to this council";
-        share.innerHTML = ICON_SHARE_SVG;
-        share.addEventListener("click", async (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const ok = await copyCouncilShareLink(row.id);
-          if (ok) {
-            share.title = "Link copied!";
-            setTimeout(() => {
-              share.title = "Copy link to this council";
-            }, 2000);
-          } else {
-            share.title = "Could not copy — select URL from address bar after opening the council.";
-            setTimeout(() => {
-              share.title = "Copy link to this council";
-            }, 3500);
-          }
+        attachShareIconButton(actions, {
+          labelTitle,
+          getUrl: () => councilShareUrl(row.id),
         });
 
         const del = document.createElement("button");
@@ -222,7 +254,6 @@ function render() {
           render();
         });
 
-        actions.appendChild(share);
         actions.appendChild(del);
         rowWrap.appendChild(a);
         rowWrap.appendChild(actions);
@@ -401,6 +432,19 @@ function downloadHomePreLaunchPdf() {
 function initHomeTeacherModals() {
   document.getElementById("teacherMenuModal")?.addEventListener("click", (e) => {
     if (e.target.closest("[data-close-tm]")) closeHomeTeacherMenu();
+  });
+  document.getElementById("teacherMenuShareBtn")?.addEventListener("click", async () => {
+    const t = homeTeacherMenuTarget;
+    if (!t?.id) return;
+    let url = "";
+    if (t.kind === "saved") url = councilShareUrl(t.id);
+    else if (t.kind === "draft") url = draftEditShareUrl(t.id);
+    if (!url) return;
+    const ok = await copyTextToClipboard(url);
+    closeHomeTeacherMenu();
+    if (!ok) {
+      window.alert("Could not copy automatically. Open this council and copy the URL from the address bar.");
+    }
   });
   document.getElementById("teacherMenuPreLaunchBtn")?.addEventListener("click", () => openHomeTeacherPreLaunch());
   document.getElementById("preLaunchModal")?.addEventListener("click", (e) => {

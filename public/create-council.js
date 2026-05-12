@@ -84,6 +84,103 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+const CREATOR_AI_FILLED_CLASS = "creator-ai-filled";
+
+function markCreatorAiFilled(el) {
+  if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
+  el.classList.add(CREATOR_AI_FILLED_CLASS);
+}
+
+function clearCreatorAiFilled(el) {
+  if (!el) return;
+  el.classList.remove(CREATOR_AI_FILLED_CLASS);
+}
+
+function markPhaseInputsAiFilledAtIndices(indices) {
+  const grid = document.getElementById("phasesGrid");
+  if (!grid || !indices?.length) return;
+  const seen = new Set(indices.map(Number).filter((n) => Number.isFinite(n) && n >= 0));
+  seen.forEach((i) => {
+    const t = grid.querySelector(`[data-phase-title="${i}"]`);
+    const d = grid.querySelector(`[data-phase-desc="${i}"]`);
+    if (t && String(t.value || "").trim()) markCreatorAiFilled(t);
+    if (d && String(d.value || "").trim()) markCreatorAiFilled(d);
+  });
+}
+
+function syncObjectivesFromDom() {
+  document.querySelectorAll("#objectivesList [data-obj-idx]").forEach((inp) => {
+    const i = Number(inp.dataset.objIdx);
+    if (Number.isFinite(i) && state.objectives[i] !== undefined) state.objectives[i] = inp.value;
+  });
+}
+
+function reorderObjectiveRows(fromIndex, toIndex) {
+  const arr = state.objectives;
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= arr.length || toIndex >= arr.length) {
+    return;
+  }
+  const next = arr.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  state.objectives = next;
+  renderObjectives();
+}
+
+function bindObjectivesListDnD(listEl) {
+  if (!listEl || state.objectives.length < 2) return;
+  listEl.querySelectorAll(".objective-drag-handle").forEach((handle) => {
+    const row = handle.closest(".objective-row");
+    if (!row) return;
+    handle.addEventListener("dragstart", (e) => {
+      syncObjectivesFromDom();
+      e.dataTransfer.setData("text/plain", String(row.dataset.objRow));
+      e.dataTransfer.effectAllowed = "move";
+      row.classList.add("objective-row--dragging");
+    });
+    handle.addEventListener("dragend", () => {
+      listEl.querySelectorAll(".objective-row--dragging").forEach((r) => r.classList.remove("objective-row--dragging"));
+      listEl.querySelectorAll(".objective-row--drag-over").forEach((r) => r.classList.remove("objective-row--drag-over"));
+    });
+  });
+  listEl.querySelectorAll(".objective-row").forEach((row) => {
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      row.classList.add("objective-row--drag-over");
+    });
+    row.addEventListener("dragleave", (e) => {
+      if (!row.contains(e.relatedTarget)) row.classList.remove("objective-row--drag-over");
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("objective-row--drag-over");
+      const from = Number(e.dataTransfer.getData("text/plain"));
+      const to = Number(row.dataset.objRow);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
+      syncObjectivesFromDom();
+      reorderObjectiveRows(from, to);
+    });
+  });
+}
+
+function markMemberCardFieldsAiFilled(idx) {
+  const wrap = document.getElementById("memberCards");
+  if (!wrap) return;
+  const card = wrap.querySelector(`[data-member-idx="${idx}"]`);
+  const m = state.members[idx];
+  if (!card || !m) return;
+  const pairs = [
+    ["name", m.name],
+    ["jobTitle", m.jobTitle],
+    ["systemInstruction", m.systemInstruction],
+  ];
+  for (const [field, val] of pairs) {
+    const el = card.querySelector(`[data-field="${field}"][data-idx="${idx}"]`);
+    if (el && String(val || "").trim()) markCreatorAiFilled(el);
+  }
+}
+
 const ALLOWED_GRADE_LEVELS = ["3-5", "6-8", "HS", "Uni+"];
 
 function getGradeLevelFromForm() {
@@ -611,6 +708,7 @@ function applyExpertToMember(idx, data) {
   };
   closeLocalExpertModal();
   renderMemberCards();
+  markMemberCardFieldsAiFilled(idx);
 }
 
 async function fetchLocalExpertIntoModal(idx, excludeCurrentBeforeFetch) {
@@ -699,17 +797,23 @@ function syncMemberCount() {
 function renderObjectives() {
   const el = document.getElementById("objectivesList");
   if (!el) return;
+  const dragOrSpacer = () =>
+    state.objectives.length > 1
+      ? `<button type="button" class="objective-drag-handle" draggable="true" aria-label="Drag to reorder learning objectives" title="Drag to reorder"><svg class="objective-drag-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.75"/><circle cx="15" cy="6" r="1.75"/><circle cx="9" cy="12" r="1.75"/><circle cx="15" cy="12" r="1.75"/><circle cx="9" cy="18" r="1.75"/><circle cx="15" cy="18" r="1.75"/></svg></button>`
+      : `<span class="objective-drag-spacer" aria-hidden="true"></span>`;
   el.innerHTML = state.objectives
     .map(
       (text, i) => `
-    <div class="objective-row">
+    <div class="objective-row" data-obj-row="${i}">
+      ${dragOrSpacer()}
       <input type="text" class="creator-input" data-obj-idx="${i}" value="${escapeHtml(text)}" placeholder="Objective ${i + 1}" />
-      ${state.objectives.length > 1 ? `<button type="button" class="icon-remove-obj" data-remove-obj="${i}" aria-label="Remove">×</button>` : ""}
+      ${state.objectives.length > 1 ? `<button type="button" class="creator-row-delete-btn" data-remove-obj="${i}" aria-label="Remove objective" title="Remove this objective">×</button>` : ""}
     </div>`
     )
     .join("");
   el.querySelectorAll("[data-obj-idx]").forEach((inp) => {
     inp.addEventListener("input", () => {
+      clearCreatorAiFilled(inp);
       state.objectives[Number(inp.dataset.objIdx)] = inp.value;
     });
   });
@@ -721,6 +825,7 @@ function renderObjectives() {
       renderObjectives();
     });
   });
+  bindObjectivesListDnD(el);
 }
 
 function fitPhaseDescTextarea(textarea) {
@@ -738,7 +843,7 @@ function renderPhases() {
       (p, i) => `
     <div class="phase-row">
       <span class="phase-num">${i + 1}</span>
-      <button type="button" class="phase-delete-btn" data-phase-delete="${i}" aria-label="Delete phase ${i + 1}" title="Delete this phase"${canDelete ? "" : " disabled"}>×</button>
+      <button type="button" class="creator-row-delete-btn" data-phase-delete="${i}" aria-label="Delete phase ${i + 1}" title="Delete this phase"${canDelete ? "" : " disabled"}>×</button>
       <input type="text" class="creator-input phase-title-input" data-phase-title="${i}" value="${escapeHtml(p.title)}" placeholder="Phase name" />
       <textarea class="creator-textarea phase-desc-input" rows="2" data-phase-desc="${i}" placeholder="Phase description / deliverable">${escapeHtml(p.description)}</textarea>
     </div>`
@@ -757,12 +862,14 @@ function renderPhases() {
   });
   grid.querySelectorAll("[data-phase-title]").forEach((inp) => {
     inp.addEventListener("input", () => {
+      clearCreatorAiFilled(inp);
       const i = Number(inp.dataset.phaseTitle);
       state.phases[i].title = inp.value;
     });
   });
   grid.querySelectorAll("[data-phase-desc]").forEach((inp) => {
     inp.addEventListener("input", () => {
+      clearCreatorAiFilled(inp);
       const i = Number(inp.dataset.phaseDesc);
       state.phases[i].description = inp.value;
       fitPhaseDescTextarea(inp);
@@ -874,6 +981,7 @@ function renderMemberCards() {
 
   wrap.querySelectorAll("[data-field]").forEach((el) => {
     el.addEventListener("input", () => {
+      clearCreatorAiFilled(el);
       const i = Number(el.dataset.idx);
       const field = el.dataset.field;
       state.members[i][field] = el.value;
@@ -922,12 +1030,25 @@ async function suggestPhases() {
   const title = document.getElementById("projectTitle")?.value?.trim() || "";
   const summary = document.getElementById("projectSummary")?.value?.trim() || "";
   const objectives = state.objectives.map((o) => o.trim()).filter(Boolean);
+  const loRowCount = Math.max(1, state.objectives.length);
+  const baseFromObj =
+    objectives.length >= 1
+      ? Math.min(8, Math.max(objectives.length, loRowCount))
+      : Math.min(8, Math.max(4, loRowCount));
   setCreatorLoading(
     true,
     "Analyzing your project…",
     "Reading your title, summary, and objectives to suggest aligned project phases."
   );
-  const phaseCount = objectives.length >= 1 ? Math.min(8, Math.max(1, objectives.length)) : 4;
+  const phaseCount = Math.min(8, Math.max(state.phases.length, baseFromObj, 1));
+  const existingPhases = [];
+  for (let i = 0; i < phaseCount; i++) {
+    const p = state.phases[i];
+    existingPhases.push({
+      title: (p?.title || "").trim(),
+      description: (p?.description || "").trim(),
+    });
+  }
 
   try {
     const res = await fetch("/api/creator/suggest-phases", {
@@ -939,6 +1060,7 @@ async function suggestPhases() {
         essentialQuestion: getEssentialQuestion(),
         objectives,
         phaseCount,
+        existingPhases,
       }),
     });
     const data = await res.json();
@@ -949,6 +1071,7 @@ async function suggestPhases() {
         description: p.description || "",
       }));
       renderPhases();
+      requestAnimationFrame(() => markPhaseInputsAiFilledAtIndices(data.aiFilledPhaseIndices));
       normalizeMemberPhaseArrays();
       const sub = document.getElementById("creatorLoadingSub");
       if (sub) sub.textContent = "Matching council members to each phase…";
@@ -1015,6 +1138,9 @@ async function suggestMembers() {
       });
       assignStockPortraitsToAiMembers();
       renderMemberCards();
+      data.members.forEach((_, i) => {
+        if (state.members[i]) markMemberCardFieldsAiFilled(i);
+      });
     }
   } catch (e) {
     err.textContent = e.message || String(e);
@@ -1082,6 +1208,7 @@ async function regenerateMember(idx) {
     normalizeMemberPhaseArrays();
     state.members[idx].phasesEnabled = coercePhasesEnabledFromApi(data.phasesEnabled, state.phases.length);
     renderMemberCards();
+    markMemberCardFieldsAiFilled(idx);
   } catch (e) {
     err.textContent = e.message || String(e);
     err.hidden = false;
@@ -1627,16 +1754,37 @@ async function analyzeBriefFile(file) {
     const currentTitle = (titleInput?.value || "").trim();
     if (titleInput && !currentTitle && data.title) {
       titleInput.value = data.title;
+      markCreatorAiFilled(titleInput);
     }
 
     const eqInput = document.getElementById("essentialQuestion");
     if (eqInput && data.essentialQuestion) {
       eqInput.value = data.essentialQuestion;
+      markCreatorAiFilled(eqInput);
     }
 
     if (Array.isArray(data.objectives) && data.objectives.length > 0) {
-      state.objectives = data.objectives.slice();
+      const incoming = data.objectives.map((o) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+      const out = state.objectives.slice();
+      const aiFilledObjectiveIndices = new Set();
+      let ii = 0;
+      for (let j = 0; j < out.length && ii < incoming.length; j++) {
+        if (!String(out[j] || "").trim()) {
+          out[j] = incoming[ii++];
+          aiFilledObjectiveIndices.add(j);
+        }
+      }
+      const maxObjectives = 12;
+      while (ii < incoming.length && out.length < maxObjectives) {
+        aiFilledObjectiveIndices.add(out.length);
+        out.push(incoming[ii++]);
+      }
+      state.objectives = out.length ? out : [""];
       renderObjectives();
+      document.getElementById("objectivesList")?.querySelectorAll("[data-obj-idx]").forEach((inp) => {
+        const idx = Number(inp.dataset.objIdx);
+        if (aiFilledObjectiveIndices.has(idx) && String(inp.value || "").trim()) markCreatorAiFilled(inp);
+      });
     }
 
     const allowedGl = new Set(ALLOWED_GRADE_LEVELS);
@@ -2082,6 +2230,12 @@ document.getElementById("supportingFiles")?.addEventListener("change", (e) => {
       errEl.textContent = err.message || String(err);
       errEl.hidden = false;
     }
+  });
+});
+
+["projectTitle", "projectSummary", "essentialQuestion"].forEach((fieldId) => {
+  document.getElementById(fieldId)?.addEventListener("input", (e) => {
+    clearCreatorAiFilled(e.target);
   });
 });
 

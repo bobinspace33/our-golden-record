@@ -279,11 +279,13 @@
 .phase-row .phase-num {
   grid-column: 1;
   grid-row: 1;
+  align-self: center;
 }
 
-.phase-row .phase-delete-btn {
+.phase-row .creator-row-delete-btn {
   grid-column: 2;
   grid-row: 1;
+  align-self: center;
 }
 
 .phase-row .phase-title-input {
@@ -304,28 +306,36 @@
   field-sizing: content;
 }
 
-.phase-delete-btn {
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-muted);
-  border-radius: var(--radius);
+/* Remove control — shared by learning objectives and project phases */
+.creator-row-delete-btn {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
   width: 2rem;
   height: 2rem;
-  padding: 0;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 
-.phase-delete-btn:hover:not(:disabled) {
+.creator-row-delete-btn:hover:not(:disabled) {
   border-color: #dc2626;
   color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
 }
 
-.phase-delete-btn:disabled {
+.creator-row-delete-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
@@ -377,6 +387,13 @@
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 0.95rem;
+}
+
+/* Highlight fields most recently filled by AI suggestions (cleared on user edit) */
+.creator-input.creator-ai-filled,
+.creator-textarea.creator-ai-filled {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success);
 }
 
 .creator-textarea.small {
@@ -563,19 +580,60 @@ input.creator-file::file-selector-button:hover {
   min-width: 0;
 }
 
+.objective-drag-spacer {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 2rem;
+}
+
+.objective-drag-handle {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 1.75rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: grab;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.objective-drag-handle:hover {
+  border-color: var(--border-active);
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.objective-drag-handle:active {
+  cursor: grabbing;
+}
+
+.objective-drag-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.objective-row--drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+.objective-row--dragging {
+  opacity: 0.65;
+}
+
 .objective-row .creator-input {
   flex: 1;
   min-width: 0;
-}
-
-.icon-remove-obj {
-  background: var(--surface-hover);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
-  width: 2rem;
-  height: 2rem;
-  cursor: pointer;
 }
 
 .member-cards {

@@ -398,6 +398,9 @@ function councilUserPromptCharLimit(gradeLevel) {
   return normalizeCouncilGradeLevel(gradeLevel) === "Uni+" ? 288 : 144;
 }
 
+/** Follow-up questions are always capped regardless of grade band. */
+const COUNCIL_FOLLOW_UP_PROMPT_MAX_CHARS = 144;
+
 function buildOpenAiChatGlobalEducationGuidance(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
   const stayOnTopic =
@@ -850,39 +853,98 @@ app.post("/api/creator/suggest-phases", async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
   }
+  const body = req.body || {};
   const { projectTitle = "", projectSummary = "", essentialQuestion = "", objectives = [], phaseCount: phaseCountRaw } =
-    req.body || {};
+    body;
+  const existingRaw = Array.isArray(body.existingPhases) ? body.existingPhases : [];
+
+  const normalizeSlot = (p) => ({
+    title: String(p?.title ?? "").replace(/\s+/g, " ").trim(),
+    description: String(p?.description ?? "").replace(/\s+/g, " ").trim(),
+  });
+  const slotIsEmpty = (p) => !p.title && !p.description;
+
   const objClean = Array.isArray(objectives)
     ? objectives.map((o) => String(o || "").replace(/\s+/g, " ").trim()).filter(Boolean)
     : [];
-  const parsed = Number(phaseCountRaw);
+  const existingPhases = existingRaw.map(normalizeSlot);
+
+  const parsedCount = Number(phaseCountRaw);
   let phaseCount =
-    Number.isFinite(parsed) && parsed >= 1 && parsed <= 8 ? Math.floor(parsed) : null;
+    Number.isFinite(parsedCount) && parsedCount >= 1 && parsedCount <= 8 ? Math.floor(parsedCount) : null;
   if (phaseCount == null) {
-    phaseCount = objClean.length >= 1 ? Math.min(8, Math.max(1, objClean.length)) : 4;
+    const baseFromObj = objClean.length >= 1 ? Math.min(8, Math.max(1, objClean.length)) : 4;
+    phaseCount = Math.min(8, Math.max(existingPhases.length, baseFromObj, 1));
+  } else {
+    phaseCount = Math.min(8, Math.max(1, phaseCount, existingPhases.length));
   }
 
+  const merged = [];
+  for (let i = 0; i < phaseCount; i++) {
+    merged.push(existingPhases[i] ? normalizeSlot(existingPhases[i]) : { title: "", description: "" });
+  }
+  const emptyIndices = [];
+  merged.forEach((p, i) => {
+    if (slotIsEmpty(p)) emptyIndices.push(i);
+  });
+
+  if (emptyIndices.length === 0) {
+    return res.json({ phases: merged, aiFilledPhaseIndices: [] });
+  }
+
+  const fillCount = emptyIndices.length;
+  const lockedLines = merged
+    .map((p, i) =>
+      slotIsEmpty(p)
+        ? null
+        : `Phase ${i + 1} (teacher's — do not repeat or paraphrase): title: ${p.title || "—"} | deliverable: ${p.description || "—"}`
+    )
+    .filter(Boolean)
+    .join("\n");
+
+  const objOrdered =
+    objClean.length > 0
+      ? objClean.map((o, i) => `${i + 1}. ${o}`).join("\n")
+      : "(not specified — infer from summary and essential question)";
+
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const prompt = `You help teachers design PBL project phases. Based on the following, propose exactly **${phaseCount}** sequential project phases—no more, no fewer. Each phase needs a short title and a one-line description/deliverable.
+  const emptyPosHuman = emptyIndices.map((i) => i + 1).join(", ");
+  const prompt = `You help teachers design **PBL project phases** (sequential, practical titles + one-line deliverables).
 
-Project title: ${projectTitle}
-Essential question (if any): ${essentialQuestion || "(not specified)"}
-Summary / brief excerpt: ${projectSummary}
-Learning objectives (list): ${objClean.join("; ") || "(not specified)"}
+The teacher already defined some phases. **Propose exactly ${fillCount} new phases** for the **empty** slots only. Those new phases must:
+- Fit logically in the ${phaseCount}-phase sequence (empty positions in order: ${emptyPosHuman}).
+- **Not** repeat, overlap, or lightly rephrase anything in the teacher's locked phases below.
+- Reflect the **learning objectives in numbered order** (objective 1 maps to earlier work, later objectives to later phases) without duplicating locked content.
 
-Reply with ONLY valid JSON (no markdown):
+**Teacher's locked phases (untouchable):**
+${lockedLines || "(none — all slots were empty; still return exactly " + fillCount + " phases aligned to objective order)"}
+
+**Learning objectives (order matters):**
+${objOrdered}
+
+Project title: ${projectTitle || "(not specified)"}
+Essential question: ${essentialQuestion || "(not specified)"}
+Summary / brief excerpt: ${projectSummary || "(not specified)"}
+
+Reply with ONLY valid JSON (no markdown). The "phases" array must have exactly ${fillCount} objects in order, filling empty positions **${emptyPosHuman}** in that same order (first JSON object → first empty phase in the sequence, etc.).
 {"phases":[{"title":"string","description":"string"}]}`;
+
   try {
     const text = await geminiGenerateText(ai, prompt);
-    const parsed = parseJsonFromModelText(text);
-    if (!parsed?.phases || !Array.isArray(parsed.phases)) {
+    const parsedJson = parseJsonFromModelText(text);
+    if (!parsedJson?.phases || !Array.isArray(parsedJson.phases)) {
       return res.status(422).json({ error: "Could not parse phases.", raw: text.slice(0, 500) });
     }
-    const phases = parsed.phases.slice(0, phaseCount);
-    while (phases.length < phaseCount) {
-      phases.push({ title: "", description: "" });
+    const newOnes = parsedJson.phases.slice(0, fillCount);
+    while (newOnes.length < fillCount) {
+      newOnes.push({ title: "", description: "" });
     }
-    res.json({ phases });
+    const out = merged.slice();
+    for (let j = 0; j < emptyIndices.length; j++) {
+      const p = normalizeSlot(newOnes[j]);
+      out[emptyIndices[j]] = { title: p.title, description: p.description };
+    }
+    res.json({ phases: out, aiFilledPhaseIndices: emptyIndices.slice() });
   } catch (e) {
     res.status(500).json({ error: e?.message || String(e) });
   }
@@ -2056,16 +2118,17 @@ app.post("/api/chat/custom", async (req, res) => {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
 
-  const maxPromptChars = councilUserPromptCharLimit(gradeLevelNorm);
+  const isFollowUp = !!(followUpPreviousResponse && typeof followUpPreviousResponse === "string");
+  const maxPromptChars = isFollowUp ? COUNCIL_FOLLOW_UP_PROMPT_MAX_CHARS : councilUserPromptCharLimit(gradeLevelNorm);
   if (!opinionOnResponse && promptText.length > maxPromptChars) {
     return res.status(400).json({
-      error: `Your question must be ${maxPromptChars} characters or fewer at this grade level (currently ${promptText.length}).`,
+      error: `Your question must be ${maxPromptChars} characters or fewer${isFollowUp ? " for follow-up messages" : " at this grade level"} (currently ${promptText.length}).`,
     });
   }
 
   let coreUserPrompt = promptText || "(The user sent the following files with no additional text.)";
   let wordLimit = 260;
-  if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
+  if (isFollowUp) {
     coreUserPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${coreUserPrompt}`;
     wordLimit = 150;
   } else if (opinionOnResponse) {
@@ -2176,9 +2239,15 @@ app.post("/api/chat", async (req, res) => {
   if (!promptText && !hasAttachments) {
     return res.status(400).json({ error: "Prompt or at least one attachment is required." });
   }
+  const isFollowUp = !!(followUpPreviousResponse && typeof followUpPreviousResponse === "string");
+  if (!opinionOnResponse && isFollowUp && promptText.length > COUNCIL_FOLLOW_UP_PROMPT_MAX_CHARS) {
+    return res.status(400).json({
+      error: `Follow-up questions must be ${COUNCIL_FOLLOW_UP_PROMPT_MAX_CHARS} characters or fewer (currently ${promptText.length}).`,
+    });
+  }
   let coreUserPrompt = promptText || "(The user sent the following files with no additional text.)";
   let wordLimit = 260;
-  if (followUpPreviousResponse && typeof followUpPreviousResponse === "string") {
+  if (isFollowUp) {
     coreUserPrompt = `You previously said:\n\n${followUpPreviousResponse}\n\nUser's follow-up question: ${coreUserPrompt}`;
     wordLimit = 150;
   } else if (opinionOnResponse) {

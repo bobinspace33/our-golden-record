@@ -46,6 +46,8 @@ const MS_PER_WORD = (60 * 1000) / WORDS_PER_MINUTE;
 const LETTER_DELAY_MS = 20;
 const SENTENCE_END_PAUSE_MS = 2000;
 const LINE_BREAK_PAUSE_MS = 2000;
+/** Follow-up prompts are always capped (main student question may be higher for Uni+). */
+const FOLLOW_UP_MAX_CHARS = 144;
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
@@ -370,7 +372,41 @@ function councilPromptMaxChars(project) {
   return g === "Uni+" ? 288 : 144;
 }
 
+function getCouncilGradeLevelForUi() {
+  if (APP_KIND === "custom" && customCouncilProject?.gradeLevel) {
+    return String(customCouncilProject.gradeLevel).trim();
+  }
+  return "6-8";
+}
+
+/** Typing animation for overlay text (faster pacing for Uni+). */
+function getResponseAnimationParams() {
+  if (getCouncilGradeLevelForUi() === "Uni+") {
+    return {
+      letterDelayMs: 11,
+      sentenceEndPauseMs: 750,
+      lineBreakPauseMs: 520,
+    };
+  }
+  return {
+    letterDelayMs: LETTER_DELAY_MS,
+    sentenceEndPauseMs: SENTENCE_END_PAUSE_MS,
+    lineBreakPauseMs: LINE_BREAK_PAUSE_MS,
+  };
+}
+
+function applyFollowUpCharLimitEverywhere() {
+  if (followUpInput) {
+    followUpInput.maxLength = FOLLOW_UP_MAX_CHARS;
+    followUpInput.setAttribute("maxlength", String(FOLLOW_UP_MAX_CHARS));
+    if (followUpInput.value.length > FOLLOW_UP_MAX_CHARS) {
+      followUpInput.value = followUpInput.value.slice(0, FOLLOW_UP_MAX_CHARS);
+    }
+  }
+}
+
 function applyCouncilPromptCharLimits() {
+  applyFollowUpCharLimitEverywhere();
   if (APP_KIND !== "custom" || !customCouncilProject) return;
   const max = councilPromptMaxChars(customCouncilProject);
   if (promptInput) {
@@ -378,15 +414,10 @@ function applyCouncilPromptCharLimits() {
     promptInput.setAttribute("maxlength", String(max));
     if (promptInput.value.length > max) promptInput.value = promptInput.value.slice(0, max);
   }
-  if (followUpInput) {
-    followUpInput.maxLength = max;
-    followUpInput.setAttribute("maxlength", String(max));
-    if (followUpInput.value.length > max) followUpInput.value = followUpInput.value.slice(0, max);
-  }
   const hint = document.getElementById("promptCharHint");
   if (hint) {
     hint.hidden = false;
-    hint.textContent = `Student questions are limited to ${max} characters at this grade level.`;
+    hint.textContent = `Student questions: up to ${max} characters at this grade level. Follow-up questions: ${FOLLOW_UP_MAX_CHARS} characters.`;
   }
 }
 
@@ -569,6 +600,7 @@ function refreshCouncilPhaseUIAfterProjectEdit() {
   syncPhaseMilestoneTitle();
   renderGems();
   setSubmitState();
+  syncCouncilEssentialQuestionTagline();
 }
 
 function openRubricPreconfirmOverlay() {
@@ -816,6 +848,19 @@ function syncPhaseMilestoneTitle() {
   }
   if (phaseMilestoneTitle) phaseMilestoneTitle.textContent = text;
   if (phaseMilestoneBannerText) phaseMilestoneBannerText.textContent = text;
+}
+
+function syncCouncilEssentialQuestionTagline() {
+  const el = document.getElementById("councilTagline");
+  if (!el) return;
+  if (APP_KIND !== "custom" || !customCouncilProject) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  const eq = String(customCouncilProject.essentialQuestion || "").trim();
+  el.textContent = eq;
+  el.hidden = !eq;
 }
 
 function setStatus(message, type = "") {
@@ -1318,17 +1363,41 @@ function tokenizeLineForFormatting(line) {
   return tokens;
 }
 
+/** Normalize model output: max one blank line between blocks, trim trailing spaces per line. */
+function preprocessChatResponseText(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  let s = raw.replace(/\r\n/g, "\n");
+  s = s.replace(/\n[ \t]+\n/g, "\n\n");
+  s = s.replace(/\n{3,}/g, "\n\n");
+  return s
+    .split("\n")
+    .map((ln) => ln.trimEnd().replace(/[ \t]{2,}/g, " "))
+    .join("\n")
+    .trimEnd();
+}
+
 function tokenizeForAnimation(text) {
-  if (!text || typeof text !== "string") return [];
+  const body = preprocessChatResponseText(text);
+  if (!body) return [];
   const tokens = [];
-  const lines = text.split(/\n/);
+  const lines = body.split("\n");
   for (let li = 0; li < lines.length; li++) {
-    const line = lines[li].trim();
-    if (!line) continue;
+    const rawLine = lines[li];
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    const md = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+    if (md) {
+      const headerInner = (md[2] || "").trim();
+      if (headerInner) {
+        tokens.push({ type: "header", text: headerInner, mdHeading: true });
+      }
+      continue;
+    }
+    const line = trimmed.replace(/[ \t]{2,}/g, " ");
     const isShort = line.length < 40;
     const noSentenceEnd = !/[.?!:]$/.test(line);
     if (isShort && noSentenceEnd) {
-      tokens.push({ type: "header", text: line });
+      tokens.push({ type: "header", text: line, mdHeading: false });
       tokens.push({ type: "linebreak" });
     } else {
       tokens.push(...tokenizeLineForFormatting(line));
@@ -1369,8 +1438,11 @@ function getWordDelayMs() {
   return 0;
 }
 
-function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
+function animateResponseText(container, text, animation = {}) {
   if (!container) return;
+  const letterDelay = animation.letterDelayMs ?? LETTER_DELAY_MS;
+  const sentencePause = animation.sentenceEndPauseMs ?? SENTENCE_END_PAUSE_MS;
+  const lineBreakPause = animation.lineBreakPauseMs ?? LINE_BREAK_PAUSE_MS;
   container.innerHTML = "";
   const tokens = tokenizeForAnimation(text);
   let i = 0;
@@ -1387,7 +1459,7 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
 
   function scheduleNext() {
     if (i >= tokens.length) return;
-    const delay = getWordDelayMs(wpm, lastAppendedToken);
+    const delay = getWordDelayMs();
     setTimeout(appendNext, delay);
   }
 
@@ -1402,7 +1474,10 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       bulletNext = false;
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
-      p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
+      p.className =
+        "response-overlay-section-header" +
+        (t.mdHeading ? " response-overlay-md-heading" : "") +
+        (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
       const headerText = (t.text || "").trim();
       if (/[?]$/.test(headerText)) {
         const bullet = document.createElement("span");
@@ -1419,12 +1494,12 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       function headerTick() {
         if (hIdx >= headerText.length) {
           scrollToBottom();
-          if (i < tokens.length) setTimeout(scheduleNext, SENTENCE_END_PAUSE_MS);
+          if (i < tokens.length) setTimeout(scheduleNext, sentencePause);
           return;
         }
         textNode.textContent += headerText[hIdx++];
         scrollToBottom();
-        setTimeout(headerTick, LETTER_DELAY_MS);
+        setTimeout(headerTick, letterDelay);
       }
       headerTick();
       return;
@@ -1439,7 +1514,7 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
       }
       previousWordEndedWithQuestion = false;
       scrollToBottom();
-      if (i < tokens.length) setTimeout(scheduleNext, LINE_BREAK_PAUSE_MS);
+      if (i < tokens.length) setTimeout(scheduleNext, lineBreakPause);
       return;
     }
     if (t.type === "word") {
@@ -1506,7 +1581,7 @@ function animateResponseText(container, text, wpm = WORDS_PER_MINUTE) {
           const ch = seg.value[charIdx++];
           span.textContent += ch;
           scrollToBottom();
-          const delay = /[.!?]/.test(ch) ? SENTENCE_END_PAUSE_MS : LETTER_DELAY_MS;
+          const delay = /[.!?]/.test(ch) ? sentencePause : letterDelay;
           setTimeout(tick, delay);
         }
         tick();
@@ -1533,7 +1608,10 @@ function renderResponseTextStatic(container, text) {
       bulletNext = false;
       previousWordEndedWithQuestion = false;
       const p = document.createElement("p");
-      p.className = "response-overlay-section-header" + (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
+      p.className =
+        "response-overlay-section-header" +
+        (t.mdHeading ? " response-overlay-md-heading" : "") +
+        (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
       if (/[?]$/.test((t.text || "").trim())) {
         const bullet = document.createElement("span");
         bullet.className = "response-overlay-bullet";
@@ -1639,14 +1717,14 @@ function appendFollowUpToCard(card, followUpText) {
     body.appendChild(block);
   }
   const textEl = block.querySelector(".response-overlay-text");
-  if (textEl) animateResponseText(textEl, followUpText, WORDS_PER_MINUTE);
+  if (textEl) animateResponseText(textEl, followUpText, getResponseAnimationParams());
 }
 
 function openResponsesOverlay(results, options = {}) {
   const { showSaveButton = true, jobTitleMap = {}, followUpsByGemId = {}, animate = true } = options;
   if (!responsesOverlayGrid || !responsesOverlay) return;
   responsesOverlayGrid.innerHTML = "";
-  const n = results.length;
+  const animParams = getResponseAnimationParams();
   results.forEach(({ gemId, name, response, error, jobTitle }) => {
     const colorKey = ((Number(gemId) - 1) % 5) + 1;
     const colors = MEMBER_COLORS[colorKey] || MEMBER_COLORS[2];
@@ -1683,7 +1761,7 @@ function openResponsesOverlay(results, options = {}) {
       if (textEl) textEl.textContent = "";
     } else if (textEl && response) {
       if (animate) {
-        animateResponseText(textEl, response, WORDS_PER_MINUTE);
+        animateResponseText(textEl, response, animParams);
       } else {
         renderResponseTextStatic(textEl, response);
       }
@@ -1693,7 +1771,13 @@ function openResponsesOverlay(results, options = {}) {
       saveBtn.type = "button";
       saveBtn.className = "btn-save response-overlay-btn";
       saveBtn.textContent = "Save Response";
-      saveBtn.addEventListener("click", () => { saveCurrentChat(); });
+      saveBtn.addEventListener("click", () => {
+        document.querySelectorAll(".response-overlay-save-feedback").forEach((el) => {
+          el.textContent = "";
+          el.hidden = true;
+        });
+        saveCurrentChat();
+      });
       actionsEl.appendChild(saveBtn);
     }
     if (!error && response && !gFound?.isHuman) {
@@ -1709,6 +1793,11 @@ function openResponsesOverlay(results, options = {}) {
       followUpBtn.textContent = "Ask follow-up";
       followUpBtn.addEventListener("click", () => openFollowUpPrompt({ gemId, name, response, card }));
       actionsEl.appendChild(followUpBtn);
+      const saveFeedback = document.createElement("span");
+      saveFeedback.className = "response-overlay-save-feedback";
+      saveFeedback.hidden = true;
+      saveFeedback.setAttribute("aria-live", "polite");
+      actionsEl.appendChild(saveFeedback);
     }
     const followUp = followUpsByGemId[gemId];
     if (followUp && followUp.length > 0) {
@@ -1733,6 +1822,7 @@ function openResponsesOverlay(results, options = {}) {
     }
     responsesOverlayGrid.appendChild(card);
   });
+  responsesOverlay.querySelector(".responses-overlay-panel")?.classList.toggle("responses-overlay-panel--uni-plus", getCouncilGradeLevelForUi() === "Uni+");
   responsesOverlay.hidden = false;
 }
 
@@ -1830,7 +1920,11 @@ function saveCurrentChat() {
   })
     .then((r) => r.json())
     .then(() => {
-      setStatus("Chat saved. Open Recent Chats to retrieve it.", "success");
+      setStatus("");
+      document.querySelectorAll(".response-overlay-save-feedback").forEach((el) => {
+        el.textContent = "Response saved";
+        el.hidden = false;
+      });
     })
     .catch((err) => setStatus("Could not save: " + (err.message || "error"), "error"));
 }
@@ -2038,7 +2132,8 @@ if (followUpCancel) followUpCancel.addEventListener("click", closeFollowUpPrompt
 if (followUpSend) {
   followUpSend.addEventListener("click", () => {
     if (!currentFollowUp || !followUpInput) return;
-    const question = followUpInput.value.trim();
+    let question = followUpInput.value.trim();
+    if (question.length > FOLLOW_UP_MAX_CHARS) question = question.slice(0, FOLLOW_UP_MAX_CHARS);
     if (!question) return;
     const fuGem = gems.find((g) => g.id === currentFollowUp.gemId);
     if (fuGem?.isHuman) {
@@ -2221,6 +2316,7 @@ async function loadGems() {
     const titleEl = document.getElementById("councilPageTitle");
     if (titleEl) titleEl.textContent = customCouncilProject.projectTitle || "Your AI Council";
     buildPhaseSectionFromProject();
+    syncCouncilEssentialQuestionTagline();
     gems = customCouncilProject.members.map((m) => ({
       id: m.id,
       name: m.name,
@@ -2255,6 +2351,7 @@ async function loadGems() {
   renderGems();
   syncPhaseMilestoneTitle();
   setSubmitState();
+  syncCouncilEssentialQuestionTagline();
 }
 
 function onPhaseChange() {
@@ -2458,3 +2555,4 @@ promptInput.addEventListener("keydown", (e) => {
 submitBtn.addEventListener("click", submit);
 
 loadGems();
+applyFollowUpCharLimitEverywhere();
