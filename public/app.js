@@ -1245,9 +1245,11 @@ function applyReplaceHumanEditorSave() {
   mm.localExpert = null;
   mm.excludedLocalExperts = Array.isArray(mm.excludedLocalExperts) ? mm.excludedLocalExperts : [];
   mm.image = image;
-  const g = getCouncilGradeLevelForUi();
+  const gradeLevel = getCouncilGradeLevelForUi();
   mm.systemInstruction =
-    g === "3-5" || g === "6-8" ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION : HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
+    gradeLevel === "3-5" || gradeLevel === "6-8"
+      ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION
+      : HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
   mm.humanContact = {
     name,
     title,
