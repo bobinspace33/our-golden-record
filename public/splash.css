@@ -148,15 +148,14 @@
   color: #80ced7;
 }
 
-/* Arrow: absolutely placed at right edge of “T” (does not affect title layout) */
+/* Arrow: same vertical size as title (1em = inherited font-size from .splash-enter) */
 .splash-arrow {
   display: none;
   position: absolute;
-  left: calc(100% - 0.11em);
+  left: calc(100% + 0.03em);
   top: 50%;
-  width: 0.42em;
-  height: auto;
-  max-height: 0.85em;
+  height: 1em;
+  width: auto;
   object-fit: contain;
   transform: translateY(-50%);
   pointer-events: auto;
@@ -164,7 +163,7 @@
 
 body.splash-interactive .splash-arrow {
   display: block;
-  animation: splash-arrow-blink 0.5s linear infinite;
+  animation: splash-arrow-blink 0.8s linear infinite;
 }
 
 @keyframes splash-arrow-blink {
@@ -183,7 +182,7 @@ body.splash-interactive .splash-arrow {
   padding: 0;
   font-family: "Comfortaa", system-ui, sans-serif;
   font-weight: 400;
-  font-size: clamp(0.95rem, 2.8vw, 1.65rem);
+  font-size: clamp(0.99rem, 2.8vw, 1.65rem);
   line-height: 1.25;
   color: #f8f8f6;
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
