@@ -46,25 +46,15 @@
     scheduleLetterFlash();
   }
 
-  /** Quick “all letters” color bursts while background fades. */
+  /** All letters pulse random accent colors for the full exit fade duration. */
   function runExitLetterBursts() {
     const els = letters();
     if (!els.length) return;
 
-    const burstCount = 6;
-    const stepMs = 75;
+    const stepMs = 85;
     let step = 0;
 
     exitBurstTimer = window.setInterval(() => {
-      if (step >= burstCount) {
-        window.clearInterval(exitBurstTimer);
-        exitBurstTimer = null;
-        els.forEach((el) => {
-          el.style.color = "";
-        });
-        return;
-      }
-
       if (step % 2 === 0) {
         els.forEach((el) => {
           el.style.color = ACCENT_COLORS[Math.floor(Math.random() * ACCENT_COLORS.length)];
@@ -90,6 +80,13 @@
     if (exitNavigateTimer != null) window.clearTimeout(exitNavigateTimer);
     exitNavigateTimer = window.setTimeout(() => {
       exitNavigateTimer = null;
+      if (exitBurstTimer != null) {
+        window.clearInterval(exitBurstTimer);
+        exitBurstTimer = null;
+      }
+      letters().forEach((el) => {
+        el.style.color = "";
+      });
       window.location.href = targetHref;
     }, EXIT_FADE_MS);
   }
