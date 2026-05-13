@@ -10,14 +10,14 @@
   <link rel="stylesheet" href="splash.css" />
 </head>
 <body class="splash-body">
-  <a class="splash-skip" href="/home.html">Skip to councils</a>
+  <a class="splash-skip" href="home.html">Skip to councils</a>
 
   <div class="splash-bg" aria-hidden="true">
     <div class="splash-bg-image">
       <div class="splash-bg-pan">
         <img
           class="splash-bg-photo"
-          src="/splash/background.jpg"
+          src="splash/background.jpg"
           alt=""
           decoding="async"
           fetchpriority="high"
@@ -28,10 +28,24 @@
     <div class="splash-bg-blackout"></div>
   </div>
 
+  <audio
+    id="splashMusic"
+    class="splash-music-audio"
+    preload="auto"
+    playsinline
+    aria-hidden="true"
+  >
+    <source src="music/Deep%20Space%20Vapor%20-%20Optimalystic/1%20-%20The%20Deep.mp3" type="audio/mpeg" />
+  </audio>
+
+  <div class="splash-music-credit" aria-hidden="true">
+    <img src="music-credit.png" alt="" class="splash-music-credit-img" width="200" height="80" decoding="async" />
+  </div>
+
   <main class="splash-main">
     <div class="splash-title-block">
       <h1 class="splash-title-line">
-        <a href="/home.html" class="splash-enter" aria-label="Konsult — open councils">
+        <a href="home.html" class="splash-enter" aria-label="Konsult — open councils">
           <span class="splash-konsult-wrap">
             <span class="splash-konsult-letters" aria-hidden="true">
               <span class="splash-letter" data-i="0">K</span>
@@ -44,7 +58,7 @@
             </span>
             <img
               class="splash-arrow"
-              src="/splash/blue-arrow.png"
+              src="splash/blue-arrow.png"
               alt=""
               width="72"
               height="72"

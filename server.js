@@ -40,6 +40,10 @@ if (process.env.VERCEL) {
   });
 }
 
+app.get("/favicon.ico", (req, res) => {
+  res.type("image/png").sendFile(path.join(PUBLIC_DIR, "globe_icon.png"));
+});
+
 app.use(express.static(PUBLIC_DIR));
 
 // Explicit root so "/" always serves the app (reliable on Vercel serverless)
