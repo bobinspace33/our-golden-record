@@ -2,7 +2,9 @@
  * Konsult splash — assets under public/splash/
  *
  *   background.jpg          — full-bleed art (optional; solid black until present)
- *     Position via .splash-bg-photo { object-position: … } (reliable with object-fit: cover).
+ *     Tune horizontal + vertical on .splash-bg-image: --splash-focal-x / --splash-focal-y.
+ *     If the image is taller than the viewport ratio, pure “cover” fills the width and the
+ *     horizontal % has no room to move; --splash-bg-zoom (>1) overscales so both axes can pan.
  *   blue-arrow.png          — blinking cue to the right of KONSULT (after 9s reveal)
  *
  * Fonts: Cal Sans (Fontsource CDN @font-face below), Comfortaa (Google Fonts in HTML).
@@ -41,22 +43,27 @@
   inset: 0;
   background-color: #000;
   overflow: hidden;
+  /* One place to pan the photo; zoom>1 guarantees horizontal pan for tall/portrait art */
+  --splash-focal-x: 56%;
+  --splash-focal-y: 54%;
+  --splash-bg-zoom: 1.18;
 }
 
-/* <img> + object-position is more predictable than background-position + cover */
 .splash-bg-photo {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Nudge focal point: higher % → right, lower % → left; second % → down / up */
-  object-position: 56% 54%;
+  object-position: var(--splash-focal-x) var(--splash-focal-y);
+  transform: scale(var(--splash-bg-zoom));
+  transform-origin: var(--splash-focal-x) var(--splash-focal-y);
 }
 
 @media (max-width: 640px) {
-  .splash-bg-photo {
-    object-position: 58% 56%;
-    /* Point src at splash/background-mobile.jpg here when you have a phone export. */
+  .splash-bg-image {
+    --splash-focal-x: 58%;
+    --splash-focal-y: 56%;
+    --splash-bg-zoom: 1.15;
   }
 }
 

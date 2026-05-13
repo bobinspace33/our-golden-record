@@ -2,6 +2,9 @@
  * Konsult splash — assets under public/splash/
  *
  *   background.jpg          — full-bleed art (optional; solid black until present)
+ *     Tune horizontal + vertical on .splash-bg-image: --splash-focal-x / --splash-focal-y.
+ *     If the image is taller than the viewport ratio, pure “cover” fills the width and the
+ *     horizontal % has no room to move; --splash-bg-zoom (>1) overscales so both axes can pan.
  *   blue-arrow.png          — blinking cue to the right of KONSULT (after 9s reveal)
  *
  * Fonts: Cal Sans (Fontsource CDN @font-face below), Comfortaa (Google Fonts in HTML).
@@ -39,18 +42,28 @@
   position: absolute;
   inset: 0;
   background-color: #000;
-  background-image: url("splash/background.jpg");
-  background-size: cover;
-  /* Slight shift vs center — tune % to nudge artwork (higher % = right / down) */
-  background-position: 56% 54%;
-  background-repeat: no-repeat;
+  overflow: hidden;
+  /* One place to pan the photo; zoom>1 guarantees horizontal pan for tall/portrait art */
+  --splash-focal-x: 56%;
+  --splash-focal-y: 54%;
+  --splash-bg-zoom: 1.18;
+}
+
+.splash-bg-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--splash-focal-x) var(--splash-focal-y);
+  transform: scale(var(--splash-bg-zoom));
+  transform-origin: var(--splash-focal-x) var(--splash-focal-y);
 }
 
 @media (max-width: 640px) {
   .splash-bg-image {
-    background-image: url("splash/background.jpg");
-    background-position: 58% 56%;
-    /* Swap URL to splash/background-mobile.jpg when you export a phone frame. */
+    --splash-focal-x: 58%;
+    --splash-focal-y: 56%;
+    --splash-bg-zoom: 1.15;
   }
 }
 
@@ -189,7 +202,7 @@ body.splash-interactive .splash-arrow {
   font-family: "Comfortaa", system-ui, sans-serif;
   font-weight: 400;
   /* Half of title cap size — only the subtitle scales with this, not the h1 */
-  font-size: calc(var(--splash-title-fs) * 0.5);
+  font-size: calc(var(--splash-title-fs) * 0.4);
   line-height: 1.25;
   color: #f8f8f6;
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
