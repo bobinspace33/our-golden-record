@@ -65,6 +65,8 @@
   width: 100%;
   height: 100%;
   transform: translate(var(--splash-pan-x), var(--splash-pan-y));
+  opacity: 1;
+  transition: opacity 5s ease-in-out;
 }
 
 .splash-bg-photo {
@@ -97,6 +99,8 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
+  opacity: 1;
+  transition: opacity 5s ease-in-out;
   background: linear-gradient(
     to right,
     #000 0%,
@@ -124,6 +128,25 @@
   to {
     opacity: 0;
   }
+}
+
+/* Exit: photo + edge vignette fade out to black (5s), then navigate */
+.splash-body.splash-exiting .splash-bg-pan {
+  opacity: 0;
+}
+.splash-body.splash-exiting .splash-bg-edge-fade {
+  opacity: 0;
+}
+.splash-body.splash-exiting .splash-enter {
+  pointer-events: none;
+  cursor: wait;
+}
+.splash-body.splash-exiting .splash-arrow {
+  animation: none;
+  opacity: 1;
+}
+.splash-body.splash-exiting .splash-letter {
+  transition: color 0.05s ease;
 }
 
 /* ——— Foreground ——— */
