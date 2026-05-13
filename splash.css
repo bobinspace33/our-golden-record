@@ -41,13 +41,15 @@
   background-color: #000;
   background-image: url("splash/background.jpg");
   background-size: cover;
-  background-position: center;
+  /* Slight shift vs center — tune % to nudge artwork (higher % = right / down) */
+  background-position: 56% 54%;
   background-repeat: no-repeat;
 }
 
 @media (max-width: 640px) {
   .splash-bg-image {
     background-image: url("splash/background.jpg");
+    background-position: 58% 56%;
     /* Swap URL to splash/background-mobile.jpg when you export a phone frame. */
   }
 }
@@ -104,6 +106,8 @@
 .splash-title-block {
   width: 100%;
   max-width: 100%;
+  /* Title scale; subtitle uses 0.5em for ~half the cap height */
+  font-size: clamp(2.5rem, 12vw, 128pt);
 }
 
 .splash-title-line {
@@ -124,7 +128,7 @@
   border-radius: 0.25rem;
   font-family: "Cal Sans", "Gill Sans", system-ui, sans-serif;
   font-weight: 400;
-  font-size: clamp(2.5rem, 12vw, 128pt);
+  font-size: 1em;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -152,9 +156,9 @@
 .splash-arrow {
   display: none;
   position: absolute;
-  left: calc(100% + 0.03em);
+  left: calc(100% + 0.09em);
   top: 50%;
-  height: 1em;
+  height: 0.7em;
   width: auto;
   object-fit: contain;
   transform: translateY(-50%);
@@ -182,7 +186,7 @@ body.splash-interactive .splash-arrow {
   padding: 0;
   font-family: "Comfortaa", system-ui, sans-serif;
   font-weight: 400;
-  font-size: clamp(0.99rem, 2.8vw, 1.65rem);
+  font-size: 0.5em;
   line-height: 1.25;
   color: #f8f8f6;
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
