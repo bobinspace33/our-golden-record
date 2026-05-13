@@ -1,0 +1,129 @@
+/*
+ * Splash art from Figma — put exports under public/splash/
+ *
+ *   background.jpg
+ *     Main / desktop frame (fills the viewport; wide layouts).
+ *
+ *   background-mobile.jpg  (optional)
+ *     Phone / narrow frame. When ready, set the background-image in the
+ *     @media (max-width: 640px) rule below to url("splash/background-mobile.jpg").
+ *
+ *   logo.svg  (optional)
+ *     Mark shown above the title when you add the file (see .splash-logo).
+ *
+ * Formats: .jpg, .webp, or .png are fine — update the filenames in this file.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+.splash-body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "DM Sans", system-ui, sans-serif;
+  color: #f8fafc;
+}
+
+/* Keyboard / screen-reader skip */
+.splash-skip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 0.75rem 1rem;
+  background: #0f172a;
+  color: #f8fafc;
+  z-index: 10;
+  transform: translateY(-120%);
+  transition: transform 0.15s ease;
+}
+.splash-skip:focus {
+  transform: translateY(0);
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+.splash-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-color: #0c1222;
+  background-image: url("splash/background.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+@media (max-width: 640px) {
+  .splash-stage {
+    /* Swap to splash/background-mobile.jpg when you export a phone frame from Figma. */
+    background-image: url("splash/background.jpg");
+  }
+}
+
+.splash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(12, 18, 34, 0.82) 0%,
+    rgba(12, 18, 34, 0.25) 45%,
+    rgba(12, 18, 34, 0.1) 100%
+  );
+}
+
+.splash-main {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: clamp(1.25rem, 4vw, 3rem);
+  padding-bottom: clamp(2rem, 8vh, 4rem);
+  text-align: center;
+}
+
+/* Optional: <img class="splash-logo" src="splash/logo.svg" alt="" /> above the h1 */
+.splash-logo {
+  display: block;
+  max-width: min(280px, 70vw);
+  height: auto;
+  margin: 0 auto 1.25rem;
+}
+
+.splash-title-line {
+  margin: 0;
+  font-size: clamp(2.5rem, 8vw, 4.5rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.45);
+}
+
+.splash-brand {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 0.25rem;
+}
+.splash-brand:hover {
+  color: #e0f2fe;
+}
+.splash-brand:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 6px;
+}
+
+.splash-dek {
+  margin: 0.75rem 0 0;
+  max-width: 28rem;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: rgba(248, 250, 252, 0.78);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+}

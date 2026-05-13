@@ -2328,7 +2328,7 @@ async function loadGems() {
       customCouncilProject = null;
     }
     if (!customCouncilProject?.members?.length) {
-      window.location.href = "/";
+      window.location.href = "/home.html";
       return;
     }
     maybeMigrateCouncilPortraits();

@@ -3,85 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PBL Council Creator</title>
+  <title>Konsult</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="creator.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="splash.css" />
 </head>
-<body class="creator-body home-body">
-  <div class="layout layout-wide">
-    <header class="creator-header">
-      <h1>PBL Council Creator</h1>
-      <p class="tagline">Design a council of AI (and human) stakeholders for any project-based learning unit. Open an existing council or build a new one.</p>
-    </header>
-
-    <section class="home-section">
-      <h2 class="home-section-title">Saved drafts</h2>
-      <p class="home-section-desc">Templates you saved before launch—continue editing anytime.</p>
-      <ul class="project-list draft-list" id="draftList"></ul>
-      <p class="home-empty home-draft-empty" id="draftEmpty" hidden>No drafts yet. Use Save draft on the create page.</p>
-    </section>
-
-    <section class="home-section">
-      <h2 class="home-section-title">Your councils</h2>
-      <ul class="project-list" id="projectList">
-        <!-- filled by home.js -->
-      </ul>
-      <p class="home-empty" id="homeEmpty" hidden>No saved councils yet. Create one below.</p>
-    </section>
-
-    <section class="home-actions">
-      <a href="/create.html" class="btn-launch-council home-create-btn">Create New Council</a>
-    </section>
-  </div>
-
-  <div
-    class="teacher-menu-overlay"
-    id="teacherMenuModal"
-    hidden
-    aria-modal="true"
-    role="dialog"
-    aria-labelledby="teacherMenuTitle"
-  >
-    <div class="teacher-menu-backdrop" data-close-tm="1"></div>
-    <div class="teacher-menu-panel">
-      <h2 class="teacher-menu-title" id="teacherMenuTitle">Teacher menu</h2>
-      <button type="button" class="teacher-menu-row" id="teacherMenuPreLaunchBtn">Pre-Launch Reflection</button>
-      <button type="button" class="teacher-menu-row" id="teacherMenuShareBtn">Copy link to share</button>
-      <button
-        type="button"
-        class="teacher-menu-row teacher-menu-row--disabled"
-        id="teacherMenuRubricsBtn"
-        disabled
-        title="Wiring in progress"
-      >
-        Rubrics<span class="teacher-menu-soon"></span>
-      </button>
-      <button type="button" class="btn-secondary teacher-menu-close" data-close-tm="1">Close</button>
-    </div>
-  </div>
-
-  <div class="prelaunch-overlay" id="preLaunchModal" hidden aria-modal="true" role="dialog" aria-labelledby="preLaunchTitle">
-    <div class="prelaunch-backdrop" data-close-pl="1"></div>
-    <div class="prelaunch-panel">
-      <div class="prelaunch-panel-head">
-        <h2 class="prelaunch-title" id="preLaunchTitle">Teacher Pre-Launch Reflection</h2>
-        <button type="button" class="prelaunch-close" data-close-pl="1" aria-label="Close">×</button>
-      </div>
-      <p class="prelaunch-meta" id="preLaunchMeta"></p>
-      <p class="prelaunch-hint" id="preLaunchLaunchHint" hidden></p>
-      <div class="prelaunch-scroll" id="preLaunchBody"></div>
-      <div class="prelaunch-actions">
-        <button type="button" class="btn-secondary" id="preLaunchDownloadPdf">Download PDF</button>
-        <button type="button" class="btn-secondary" data-close-pl="1">Close</button>
-        <button type="button" class="btn-launch-council" id="preLaunchLaunchCouncilBtn" hidden>Launch Council</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
-  <script src="home.js"></script>
+<body class="splash-body">
+  <a class="splash-skip" href="/home.html">Skip to councils</a>
+  <div class="splash-stage" aria-hidden="true"></div>
+  <div class="splash-overlay" aria-hidden="true"></div>
+  <main class="splash-main">
+    <h1 class="splash-title-line">
+      <a href="/home.html" class="splash-brand">Konsult</a>
+    </h1>
+    <p class="splash-dek">Open your project councils — tap the title above.</p>
+  </main>
 </body>
 </html>
