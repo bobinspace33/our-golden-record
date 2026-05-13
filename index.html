@@ -6,18 +6,44 @@
   <title>Konsult</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="splash.css" />
 </head>
 <body class="splash-body">
   <a class="splash-skip" href="/home.html">Skip to councils</a>
-  <div class="splash-stage" aria-hidden="true"></div>
-  <div class="splash-overlay" aria-hidden="true"></div>
+
+  <div class="splash-bg" aria-hidden="true">
+    <div class="splash-bg-image"></div>
+    <div class="splash-bg-blackout"></div>
+  </div>
+
   <main class="splash-main">
-    <h1 class="splash-title-line">
-      <a href="/home.html" class="splash-brand">Konsult</a>
-    </h1>
-    <p class="splash-dek">Open your project councils — tap the title above.</p>
+    <div class="splash-title-block">
+      <h1 class="splash-title-line">
+        <a href="/home.html" class="splash-enter" aria-label="Konsult — open councils">
+          <span class="splash-konsult-letters" aria-hidden="true">
+            <span class="splash-letter" data-i="0">K</span>
+            <span class="splash-letter splash-letter--o" data-i="1">O</span>
+            <span class="splash-letter" data-i="2">N</span>
+            <span class="splash-letter" data-i="3">S</span>
+            <span class="splash-letter" data-i="4">U</span>
+            <span class="splash-letter" data-i="5">L</span>
+            <span class="splash-letter" data-i="6">T</span>
+          </span>
+          <img
+            class="splash-arrow"
+            src="splash/blue-arrow.png"
+            alt=""
+            width="72"
+            height="72"
+            decoding="async"
+          />
+        </a>
+      </h1>
+      <p class="splash-subtitle">Experiential learning assistant</p>
+    </div>
   </main>
+
+  <script src="splash.js" defer></script>
 </body>
 </html>
