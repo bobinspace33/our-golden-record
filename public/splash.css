@@ -5,7 +5,7 @@
  *     --splash-focal-x / --splash-focal-y align the crop (0%–100%; can feel “stuck” at extremes).
  *     --splash-pan-x / --splash-pan-y (e.g. 5% or -3vw) translate the layer for extra left/right/up/down
  *     without hitting object-position limits. Positive pan-x = slide art toward the right on screen.
- *   blue-arrow.png          — blinking cue to the right of KONSULT (after 9s reveal)
+ *     Horizontal edge vignette: .splash-bg --splash-vignette-inner / --splash-vignette-mid
  *
  * Fonts: Cal Sans (Fontsource CDN @font-face below), Comfortaa (Google Fonts in HTML).
  */
@@ -30,26 +30,30 @@
   color: #f8f8f6;
 }
 
-/* ——— Background stack: image under blackout, fade from black over 9s ——— */
+/* ——— Background stack: photo → side vignette → intro blackout (on top) ——— */
 .splash-bg {
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
+  /* Horizontal fade to black at edges; widen by increasing inner % */
+  --splash-vignette-inner: 20%;
+  --splash-vignette-mid: 9%;
 }
 
 .splash-bg-image {
   position: absolute;
   inset: 0;
+  z-index: 0;
   background-color: #000;
   overflow: hidden;
   /* Focal crop inside the img → object-position */
   --splash-focal-x: 50%;
-  --splash-focal-y: 54%;
+  --splash-focal-y: 1%;
   /* >1 overscales past cover so tall art still crops left/right */
-  --splash-bg-zoom: 1.18;
+  --splash-bg-zoom: 1.15;
   /* Whole layer nudge (% of pan box size, or use vw) — not limited like object-position */
-  --splash-pan-x: 0%;
+  --splash-pan-x: 10%;
   --splash-pan-y: 0%;
 }
 
@@ -74,6 +78,11 @@
 }
 
 @media (max-width: 640px) {
+  .splash-bg {
+    --splash-vignette-inner: 24%;
+    --splash-vignette-mid: 10%;
+  }
+
   .splash-bg-image {
     --splash-focal-x: 50%;
     --splash-focal-y: 56%;
@@ -83,9 +92,26 @@
   }
 }
 
+.splash-bg-edge-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    #000 0%,
+    rgba(0, 0, 0, 0.82) var(--splash-vignette-mid),
+    rgba(0, 0, 0, 0) var(--splash-vignette-inner),
+    rgba(0, 0, 0, 0) calc(100% - var(--splash-vignette-inner)),
+    rgba(0, 0, 0, 0.82) calc(100% - var(--splash-vignette-mid)),
+    #000 100%
+  );
+}
+
 .splash-bg-blackout {
   position: absolute;
   inset: 0;
+  z-index: 2;
   background: #000;
   pointer-events: none;
   animation: splash-bg-reveal 9s ease-out forwards;
