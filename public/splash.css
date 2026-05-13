@@ -118,7 +118,8 @@
   z-index: 2;
   background: #000;
   pointer-events: none;
-  animation: splash-bg-reveal 9s ease-out forwards;
+  --splash-blackout-duration: 9s;
+  animation: splash-bg-reveal var(--splash-blackout-duration) ease-out forwards;
 }
 
 @keyframes splash-bg-reveal {

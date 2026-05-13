@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Konsult</title>
+  <!-- Early fetch — large MP3 so playback can align with blackout reveal -->
+  <link rel="preload" href="music/Deep%20Space%20Vapor%20-%20Optimalystic/1%20-%20The%20Deep.mp3" as="audio" type="audio/mpeg" />
+  <audio
+    id="splashMusic"
+    class="splash-music-audio"
+    preload="auto"
+    playsinline
+    aria-hidden="true"
+  >
+    <source src="music/Deep%20Space%20Vapor%20-%20Optimalystic/1%20-%20The%20Deep.mp3" type="audio/mpeg" />
+  </audio>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600&display=swap" rel="stylesheet" />
@@ -27,16 +38,6 @@
     <div class="splash-bg-edge-fade"></div>
     <div class="splash-bg-blackout"></div>
   </div>
-
-  <audio
-    id="splashMusic"
-    class="splash-music-audio"
-    preload="auto"
-    playsinline
-    aria-hidden="true"
-  >
-    <source src="music/Deep%20Space%20Vapor%20-%20Optimalystic/1%20-%20The%20Deep.mp3" type="audio/mpeg" />
-  </audio>
 
   <div class="splash-music-credit" aria-hidden="true">
     <img src="music-credit.png" alt="" class="splash-music-credit-img" width="200" height="80" decoding="async" />

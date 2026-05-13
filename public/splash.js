@@ -1,5 +1,6 @@
 (function () {
-  const REVEAL_MS = 9000;
+  /** Must stay in sync with `.splash-bg-blackout`/`--splash-blackout-duration` in splash.css */
+  const BLACKOUT_REVEAL_MS = 9000;
   const EXIT_FADE_MS = 5000;
   /** Fully visible hold after slide-in completes. */
   const MUSIC_CREDIT_HOLD_MS = 5000;
@@ -20,6 +21,8 @@
   let musicCreditHoldTimer = null;
   let musicCreditOutTimer = null;
   let musicCreditEndTimer = null;
+  let splashBlackoutKickDone = false;
+  let blackoutAlignFallbackTimer = null;
   function flashDurationMs() {
     return 200 + Math.random() * 700;
   }
@@ -80,9 +83,14 @@
     }, MUSIC_CREDIT_SLIDE_IN_MS);
   }
 
+  function beginSplashMusicAttempt(showCreditWhenPlaying) {
+    if (!splashMusic) return;
+    void kickSplashMusicCycle(showCreditWhenPlaying).catch(() => {});
+  }
+
   /**
    * Most browsers block autoplay without a user gesture. pointerdown/keydown fires before a KONSULT click,
-   * so play() succeeds in gesture context and credits still schedule.
+   * so play() succeeds in gesture context.
    */
   function bindSplashMusicUserPlayback() {
     if (!splashMusic) return;
@@ -99,6 +107,50 @@
     splashMusic.addEventListener("error", () => {
       console.warn("Splash music failed to load. Check audio path:", splashMusic.src || splashMusic.currentSrc);
     });
+  }
+
+  /** Fire when `.splash-bg-blackout` fade begins (`defer` scripts may attach after animationstart — cover that). */
+  function alignSplashMusicToBlackoutStart() {
+    if (!splashMusic) return;
+
+    function kickOnceBlackoutBegins() {
+      if (splashBlackoutKickDone) return;
+      splashBlackoutKickDone = true;
+      if (blackoutAlignFallbackTimer != null) {
+        window.clearTimeout(blackoutAlignFallbackTimer);
+        blackoutAlignFallbackTimer = null;
+      }
+      beginSplashMusicAttempt(true);
+    }
+
+    const blackout = document.querySelector(".splash-bg-blackout");
+    if (!blackout) {
+      kickOnceBlackoutBegins();
+      return;
+    }
+
+    blackout.addEventListener(
+      "animationstart",
+      (ev) => {
+        if (ev.animationName !== "splash-bg-reveal") return;
+        kickOnceBlackoutBegins();
+      },
+      false
+    );
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const cs = window.getComputedStyle(blackout);
+        if (
+          cs.animationName === "splash-bg-reveal" &&
+          (cs.animationPlayState === "running" || cs.animationPlayState === "pending")
+        ) {
+          kickOnceBlackoutBegins();
+        }
+      });
+    });
+
+    blackoutAlignFallbackTimer = window.setTimeout(() => kickOnceBlackoutBegins(), 120);
   }
 
   function fadeSplashMusicOut(durationMs) {
@@ -219,7 +271,7 @@
   revealTimer = window.setTimeout(() => {
     revealTimer = null;
     startInteractivePhase();
-  }, REVEAL_MS);
+  }, BLACKOUT_REVEAL_MS);
 
   if (splashMusic) {
     bindSplashMusicUserPlayback();
@@ -228,12 +280,16 @@
       void kickSplashMusicCycle(true).catch(() => {});
     });
     splashMusic.volume = 1;
-    void kickSplashMusicCycle(true).catch(() => {});
+    alignSplashMusicToBlackoutStart();
   }
 
   window.addEventListener("pagehide", () => {
     stopLetterFlashLoop();
     stopRevealTimer();
+    if (blackoutAlignFallbackTimer != null) {
+      window.clearTimeout(blackoutAlignFallbackTimer);
+      blackoutAlignFallbackTimer = null;
+    }
     cancelMusicCreditTimers();
     if (splashMusicFadeRaf != null) {
       window.cancelAnimationFrame(splashMusicFadeRaf);
