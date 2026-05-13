@@ -1035,6 +1035,8 @@ function extractUrlSegments(str) {
 
 function responseToHtml(text) {
   if (text == null || text === "") return "";
+  const mdToHtml =
+    typeof markdownInlineToHtml === "function" ? markdownInlineToHtml : (s) => escapeHtml(String(s ?? ""));
   let out = "";
   const mdLinkRe = /\[([^\]]*)\]\((https?:\/\/[^)\s]+|www\.[^)\s]+)\)/gi;
   let lastEnd = 0;
@@ -1048,19 +1050,39 @@ function responseToHtml(text) {
   parts.push({ type: "text", value: text.slice(lastEnd) });
   for (const p of parts) {
     if (p.type === "mdLink") {
-      out += '<a class="response-text-link" href="' + escapeHtml(normalizeUrl(p.url)) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(p.text || p.url) + "</a>";
+      out +=
+        '<a class="response-text-link" href="' +
+        escapeHtml(normalizeUrl(p.url)) +
+        '" target="_blank" rel="noopener noreferrer">' +
+        mdToHtml(p.text || p.url) +
+        "</a>";
       continue;
     }
     const segments = extractUrlSegments(p.value);
     for (const s of segments) {
       if (s.type === "url") {
-        out += '<a class="response-text-link" href="' + escapeHtml(s.value) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(s.value) + "</a>";
+        out +=
+          '<a class="response-text-link" href="' +
+          escapeHtml(s.value) +
+          '" target="_blank" rel="noopener noreferrer">' +
+          escapeHtml(s.value) +
+          "</a>";
       } else {
-        out += escapeHtml(s.value);
+        out += mdToHtml(s.value);
       }
     }
   }
-  return out || escapeHtml(text);
+  return out || mdToHtml(text);
+}
+
+/** Multi-line overlay follow-ups: line breaks plus * / ** on each line. */
+function markdownFollowUpToHtml(text) {
+  if (text == null || text === "") return "";
+  if (typeof markdownInlineToHtml !== "function") return escapeHtml(text);
+  return String(text)
+    .split("\n")
+    .map((line) => markdownInlineToHtml(line))
+    .join("<br />");
 }
 
 const ALLOWED_MIME_PREFIXES = ["image/", "text/", "application/pdf", "text/html"];
@@ -1365,6 +1387,7 @@ function maybeMigrateCouncilPortraits() {
 }
 
 function tokenizeLineForFormatting(line) {
+  if (typeof tokenizeMarkdownLineForCouncil === "function") return tokenizeMarkdownLineForCouncil(line);
   const tokens = [];
   const re = /\*\*[^*]+\*\*|\*[^*]+\*|[^\s*]+|\s+/g;
   let m;
@@ -1374,7 +1397,7 @@ function tokenizeLineForFormatting(line) {
     if (/^\*\*[^*]+\*\*$/.test(seg)) {
       tokens.push({ type: "word", text: seg.slice(2, -2), bold: true, italic: false });
     } else if (/^\*[^*]+\*$/.test(seg)) {
-      tokens.push({ type: "word", text: seg.slice(1, -1), bold: false, italic: false });
+      tokens.push({ type: "word", text: seg.slice(1, -1), bold: false, italic: true });
     } else {
       tokens.push({ type: "word", text: seg, bold: false, italic: false });
     }
@@ -1492,12 +1515,37 @@ function animateResponseText(container, text, animation = {}) {
       needSpace = false;
       bulletNext = false;
       previousWordEndedWithQuestion = false;
+      const headerText = (t.text || "").trim();
+      const rich =
+        typeof markdownInlineToHtml === "function" &&
+        /\*\*|\*(?!\*)/.test(headerText);
+      if (rich) {
+        const pr = document.createElement("p");
+        pr.className =
+          "response-overlay-section-header" +
+          (t.mdHeading ? " response-overlay-md-heading" : "") +
+          (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
+        if (/[?]$/.test(headerText)) {
+          const bullet = document.createElement("span");
+          bullet.className = "response-overlay-bullet";
+          bullet.textContent = "• ";
+          pr.appendChild(bullet);
+        }
+        const inner = document.createElement("span");
+        inner.innerHTML = markdownInlineToHtml(headerText);
+        pr.appendChild(inner);
+        container.appendChild(pr);
+        container.appendChild(document.createElement("br"));
+        lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
+        scrollToBottom();
+        if (i < tokens.length) setTimeout(scheduleNext, sentencePause);
+        return;
+      }
       const p = document.createElement("p");
       p.className =
         "response-overlay-section-header" +
         (t.mdHeading ? " response-overlay-md-heading" : "") +
         (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      const headerText = (t.text || "").trim();
       if (/[?]$/.test(headerText)) {
         const bullet = document.createElement("span");
         bullet.className = "response-overlay-bullet";
@@ -1626,12 +1674,26 @@ function renderResponseTextStatic(container, text) {
       needSpace = false;
       bulletNext = false;
       previousWordEndedWithQuestion = false;
+      const headerText = (t.text || "").trim();
+      const rich =
+        typeof markdownInlineToHtml === "function" &&
+        /\*\*|\*(?!\*)/.test(headerText);
       const p = document.createElement("p");
       p.className =
         "response-overlay-section-header" +
         (t.mdHeading ? " response-overlay-md-heading" : "") +
         (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      if (/[?]$/.test((t.text || "").trim())) {
+      if (rich) {
+        if (/[?]$/.test(headerText)) {
+          const bullet = document.createElement("span");
+          bullet.className = "response-overlay-bullet";
+          bullet.textContent = "• ";
+          p.appendChild(bullet);
+        }
+        const inner = document.createElement("span");
+        inner.innerHTML = markdownInlineToHtml(headerText);
+        p.appendChild(inner);
+      } else if (/[?]$/.test(headerText)) {
         const bullet = document.createElement("span");
         bullet.className = "response-overlay-bullet";
         bullet.textContent = "• ";
@@ -1832,7 +1894,7 @@ function openResponsesOverlay(results, options = {}) {
         fc.className = "response-overlay-followup-item";
         fc.innerHTML = `
           <strong>${escapeHtml(followName)}</strong> ${r.jobTitle ? `<span class="response-overlay-followup-role">${escapeHtml(r.jobTitle)}</span>` : ""}
-          <p class="response-overlay-followup-text">${escapeHtml(r.response || "")}</p>
+          <p class="response-overlay-followup-text">${markdownFollowUpToHtml(r.response || "")}</p>
         `;
         list.appendChild(fc);
       });

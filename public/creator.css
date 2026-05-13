@@ -246,6 +246,15 @@
   color: var(--accent);
 }
 
+.prelaunch-heading strong {
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.prelaunch-heading em {
+  font-style: italic;
+}
+
 .prelaunch-questions {
   margin: 0;
   padding-left: 1.25rem;
@@ -256,6 +265,14 @@
 
 .prelaunch-questions li {
   margin-bottom: 0.45rem;
+}
+
+.prelaunch-questions li strong {
+  font-weight: 650;
+}
+
+.prelaunch-questions li em {
+  font-style: italic;
 }
 
 .prelaunch-actions {
@@ -832,7 +849,7 @@ input.creator-file::file-selector-button:hover {
 }
 
 .local-expert-modal-loading {
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
   gap: 0.65rem;
@@ -842,6 +859,11 @@ input.creator-file::file-selector-button:hover {
   color: var(--text);
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+/* Flex rule below can override [hidden] in some browsers — toggle visibility in JS only */
+.local-expert-modal-loading.local-expert-modal-loading--visible {
+  display: flex;
 }
 
 .local-expert-modal-loading-sub {

@@ -84,6 +84,26 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+/** Prefer shared md-inline.js; safe fallback escapes only. */
+function markdownInlinePreview(s) {
+  if (typeof markdownInlineToHtml === "function") return markdownInlineToHtml(s);
+  return escapeHtml(s);
+}
+
+/** Plain text for PDF export (drops markdown markers cleanly). */
+function stripMarkdownMarkersForPdf(s) {
+  if (typeof markdownInlineToHtml === "function") {
+    try {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = markdownInlineToHtml(String(s ?? ""));
+      return tmp.textContent || "";
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(s ?? "");
+}
+
 const CREATOR_AI_FILLED_CLASS = "creator-ai-filled";
 
 function markCreatorAiFilled(el) {
@@ -648,7 +668,10 @@ function setLocalExpertModalLoading(loading) {
   const hint = document.getElementById("localExpertModalHint");
   if (modal) modal.setAttribute("aria-busy", loading ? "true" : "false");
   if (panel) panel.classList.toggle("local-expert-modal-panel--busy", loading);
-  if (loadEl) loadEl.hidden = !loading;
+  if (loadEl) {
+    loadEl.classList.toggle("local-expert-modal-loading--visible", loading);
+    loadEl.setAttribute("aria-hidden", loading ? "false" : "true");
+  }
   if (bodyEl) bodyEl.hidden = loading;
   if (prompt) prompt.hidden = loading;
   if (hint) hint.hidden = loading;
@@ -1849,9 +1872,9 @@ function fillPreLaunchModal(doc) {
     body.innerHTML = doc.sections
       .map((sec) => {
         const qs = (sec.questions || [])
-          .map((q) => `<li>${escapeHtml(q)}</li>`)
+          .map((q) => `<li>${markdownInlinePreview(q)}</li>`)
           .join("");
-        return `<section class="prelaunch-section"><h3 class="prelaunch-heading">${escapeHtml(sec.heading)}</h3><ol class="prelaunch-questions">${qs}</ol></section>`;
+        return `<section class="prelaunch-section"><h3 class="prelaunch-heading">${markdownInlinePreview(sec.heading || "")}</h3><ol class="prelaunch-questions">${qs}</ol></section>`;
       })
       .join("");
   }
@@ -1986,7 +2009,7 @@ function downloadPreLaunchReflectionPdf() {
   for (const sec of data.sections) {
     doc.setFontSize(13);
     doc.setFont(undefined, "bold");
-    const headLines = doc.splitTextToSize(sec.heading || "", maxW);
+    const headLines = doc.splitTextToSize(stripMarkdownMarkersForPdf(sec.heading || ""), maxW);
     headLines.forEach((ln) => {
       ensureSpace(lineStep + 2);
       doc.text(ln, margin, y);
@@ -1997,7 +2020,7 @@ function downloadPreLaunchReflectionPdf() {
     doc.setFont(undefined, "normal");
     const qs = Array.isArray(sec.questions) ? sec.questions : [];
     qs.forEach((q, qi) => {
-      const bullet = `${qi + 1}. ${String(q || "").trim()}`;
+      const bullet = `${qi + 1}. ${stripMarkdownMarkersForPdf(String(q || "").trim())}`;
       const wrapped = doc.splitTextToSize(bullet, maxW - 14);
       wrapped.forEach((ln, li) => {
         ensureSpace(lineStep);

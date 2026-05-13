@@ -18,8 +18,7 @@
 
     <header class="creator-header creator-header-row">
       <div class="creator-header-text">
-        <h1>Create New PBL Council</h1>
-        <p class="tagline">Describe your PBL unit. The assistant will suggest phases and council roles you can refine.</p>
+        <h1>Create New Stakeholder Council</h1>
       </div>
       <button type="button" class="teacher-menu-btn" id="teacherMenuBtn" aria-label="Teacher menu" title="Teacher menu">
         <span class="teacher-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
@@ -28,23 +27,29 @@
 
     <form id="creatorForm" class="creator-form" onsubmit="return false;">
       <section class="creator-block">
-        <label class="creator-label" for="projectTitle">Project title</label>
-        <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
-      </section>
-
-      <section class="creator-block">
-        <h2 class="creator-block-title">1. Project brief</h2>
-        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline (PDF or text). If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
+        <h2 class="creator-block-title">1. Project brief - START HERE!</h2>
+        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline. If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
         <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file. Upload a new file to replace it.</p>
-        <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,text/*" class="creator-file" />
+        <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*" class="creator-file" />
         <label class="creator-label" for="projectSummary">Summary for AI (paste key points if the file is large)</label>
         <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the project brief…"></textarea>
+        <label class="creator-label" for="projectTitle">Project title</label>
+        <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
+        <fieldset class="grade-level-fieldset">
+          <legend class="creator-label">Grade level</legend>
+          <div class="grade-level-options">
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="3-5" /> 3–5</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="6-8" checked /> 6–8</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="HS" /> HS</label>
+            <label class="grade-level-option"><input type="radio" name="gradeLevel" value="Uni+" /> Uni+</label>
+          </div>
+        </fieldset>
       </section>
 
       <section class="creator-block">
         <h2 class="creator-block-title">2. Essential question</h2>
         <p class="creator-hint">
-          The driving question that frames the unit. Uploading a project brief can fill this automatically—for example, the question under <strong>Project Launch</strong> on PBL Works templates.
+          The driving question that frames the unit. Uploading a project brief can fill this automatically.
         </p>
         <label class="creator-label" for="essentialQuestion">Essential question</label>
         <textarea
@@ -58,7 +63,7 @@
       <section class="creator-block">
         <h2 class="creator-block-title">3. Supporting documents</h2>
         <p class="creator-hint">
-          Standards, rubrics, or context (PDF, TXT, MD, CSV, HTML).
+          Standards, rubrics, or additional context.
         </p>
         <input type="file" id="supportingFiles" accept=".pdf,.txt,.md,.csv,.html,text/*" multiple class="creator-file" />
         <p class="supporting-list-label" id="supportingListLabel" hidden>Uploaded supporting files</p>
@@ -83,7 +88,7 @@
 
       <section class="creator-block">
         <h2 class="creator-block-title">6. Council members</h2>
-        <p class="creator-hint">Between 2 and 6 council members. Click Globe icon to search for a local expert.</p>
+        <p class="creator-hint">Recommended one member per project phase. Click Globe icon to search for a local expert.</p>
         <div class="creator-toolbar">
           <label>Council size
             <select id="memberCount" class="creator-select">
@@ -143,7 +148,7 @@
     <div class="local-expert-modal-backdrop" data-close-lem="1"></div>
     <div class="local-expert-modal-panel">
       <h2 class="local-expert-modal-title" id="localExpertModalTitle">Local expert</h2>
-      <div class="local-expert-modal-loading" id="localExpertModalLoading" hidden>
+      <div class="local-expert-modal-loading" id="localExpertModalLoading" aria-hidden="true">
         <div class="council-loading-spinner" aria-hidden="true"></div>
         <p id="lemLoadingMessage">Finding a local expert…</p>
         <p class="local-expert-modal-loading-sub" id="lemLoadingSub"></p>
@@ -232,6 +237,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
+  <script src="md-inline.js"></script>
   <script src="create-council.js"></script>
 </body>
 </html>

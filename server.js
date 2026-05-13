@@ -647,6 +647,32 @@ async function getLocationFromRequest(req) {
   }
 }
 
+/** First complete `{ ... }` from index, respecting JSON string quoting (handles nested `}` in strings). */
+function extractBalancedJsonObjectSlice(s, startIdx) {
+  let depth = 0;
+  let inStr = false;
+  let escaped = false;
+  for (let i = startIdx; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === "\"") inStr = false;
+      continue;
+    }
+    if (c === "\"") {
+      inStr = true;
+      continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(startIdx, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJsonFromModelText(text) {
   if (!text || typeof text !== "string") return null;
   let trimmed = text.trim();
@@ -655,13 +681,40 @@ function parseJsonFromModelText(text) {
   if (fenced) trimmed = fenced[1].trim();
   else trimmed = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/m, "").trim();
   const start = trimmed.indexOf("{");
+  if (start === -1) return null;
+  const balanced = extractBalancedJsonObjectSlice(trimmed, start);
   const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end <= start) return null;
-  try {
-    return JSON.parse(trimmed.slice(start, end + 1));
-  } catch {
-    return null;
+  const legacySlice = end > start ? trimmed.slice(start, end + 1) : null;
+  const attempts = balanced ? [balanced] : [];
+  if (legacySlice && legacySlice !== balanced) attempts.push(legacySlice);
+  for (const fragment of attempts) {
+    try {
+      return JSON.parse(fragment);
+    } catch {
+      /* try next */
+    }
   }
+  return null;
+}
+
+/** Gemini sometimes labels the roster array differently despite the prompt—accept common variants. */
+function pickMembersArrayFromParsed(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+  if (Array.isArray(parsed.members)) return parsed.members;
+  const altKeys = [
+    "Members",
+    "councilMembers",
+    "council_members",
+    "stakeholders",
+    "roles",
+    "advisors",
+    "suggestions",
+    "recommendedMembers",
+  ];
+  for (const k of altKeys) {
+    if (Array.isArray(parsed[k])) return parsed[k];
+  }
+  return null;
 }
 
 /** Prefer SDK .text; fall back to candidates (some responses omit the accessor). */
@@ -1245,13 +1298,42 @@ Replace phasesEnabled with your chosen true/false pattern (${phaseCount} entries
 
 For each member, portraitGender MUST reflect how the given name is most often read in English-speaking classrooms: "female" or "male" when the first/given name strongly suggests it, otherwise "neutral" (ambiguous names, initials-only, surnames-only, or honorific-only).`;
   try {
-    const text = await geminiGenerateText(ai, prompt);
-    const parsed = parseJsonFromModelText(text);
-    if (!parsed?.members || !Array.isArray(parsed.members)) {
+    let text = "";
+    let rawRows = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const body =
+        attempt === 0
+          ? prompt
+          : `The last reply could not be read as strict JSON with a non-empty roster array named "members" (alternates: councilMembers, roles).
+
+Return ONLY valid JSON — no markdown fences, no commentary. One root object shaped like {"members":[...]} with exactly ${count} member objects.
+
+Each member keys: name, jobTitle, systemInstruction, portraitGender ("female"|"male"|"neutral")${
+            phaseCount > 0 ? `, phasesEnabled: array of exactly ${phaseCount} booleans with at least one true per member` : ""
+          }.
+
+Context for roles:
+Project title: ${projectTitle}
+Essential question: ${essentialQuestion || "(not specified)"}
+Summary: ${projectSummary}
+Objectives: ${Array.isArray(objectives) ? objectives.join("; ") : ""}
+Phases:
+${phaseStr || "(none—omit phasesEnabled or use [])."}
+
+Broken output began with:
+${text.slice(0, 900)}`;
+
+      text = await geminiGenerateText(ai, body);
+      const parsed = parseJsonFromModelText(text);
+      rawRows = pickMembersArrayFromParsed(parsed);
+      if (Array.isArray(rawRows) && rawRows.length > 0) break;
+      rawRows = null;
+    }
+    if (!rawRows || !Array.isArray(rawRows)) {
       return res.status(422).json({ error: "Could not parse members.", raw: text.slice(0, 500) });
     }
     const portraitOk = new Set(["female", "male", "neutral"]);
-    const members = parsed.members.slice(0, count).map((row) => {
+    const members = rawRows.slice(0, count).map((row) => {
       const pg = String(row.portraitGender || "").trim().toLowerCase();
       return {
         name: row.name || "",

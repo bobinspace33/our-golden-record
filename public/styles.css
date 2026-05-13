@@ -693,6 +693,14 @@ body[data-app="custom"] .upload-btn:hover {
   color: var(--text);
 }
 
+.result-card .response-text strong {
+  font-weight: 700;
+}
+
+.result-card .response-text em {
+  font-style: italic;
+}
+
 .result-card .response-text .response-text-link {
   color: var(--accent);
   text-decoration: underline;
@@ -1198,6 +1206,15 @@ body[data-app="custom"] .upload-btn:hover {
   margin-bottom: 0.25em;
 }
 
+.response-overlay-section-header strong {
+  font-weight: 800;
+}
+
+.response-overlay-section-header em {
+  font-style: italic;
+  opacity: 0.95;
+}
+
 .response-overlay-text .response-overlay-link,
 .response-overlay-text a[href] {
   color: var(--accent);
@@ -1327,6 +1344,16 @@ body[data-app="custom"] .upload-btn:hover {
   font-size: 1.05rem;
   line-height: 1.5;
   color: #e8e8ec;
+}
+
+.response-overlay-followup-text strong {
+  font-weight: 700;
+  color: #fff;
+}
+
+.response-overlay-followup-text em {
+  font-style: italic;
+  color: #e8e8f0;
 }
 
 .follow-up-prompt-box {
