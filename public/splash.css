@@ -2,9 +2,9 @@
  * Konsult splash — assets under public/splash/
  *
  *   background.jpg          — full-bleed art (optional; solid black until present)
- *     Tune horizontal + vertical on .splash-bg-image: --splash-focal-x / --splash-focal-y.
- *     If the image is taller than the viewport ratio, pure “cover” fills the width and the
- *     horizontal % has no room to move; --splash-bg-zoom (>1) overscales so both axes can pan.
+ *     --splash-focal-x / --splash-focal-y align the crop (0%–100%; can feel “stuck” at extremes).
+ *     --splash-pan-x / --splash-pan-y (e.g. 5% or -3vw) translate the layer for extra left/right/up/down
+ *     without hitting object-position limits. Positive pan-x = slide art toward the right on screen.
  *   blue-arrow.png          — blinking cue to the right of KONSULT (after 9s reveal)
  *
  * Fonts: Cal Sans (Fontsource CDN @font-face below), Comfortaa (Google Fonts in HTML).
@@ -43,10 +43,24 @@
   inset: 0;
   background-color: #000;
   overflow: hidden;
-  /* One place to pan the photo; zoom>1 guarantees horizontal pan for tall/portrait art */
-  --splash-focal-x: 56%;
+  /* Focal crop inside the img → object-position */
+  --splash-focal-x: 50%;
   --splash-focal-y: 54%;
+  /* >1 overscales past cover so tall art still crops left/right */
   --splash-bg-zoom: 1.18;
+  /* Whole layer nudge (% of pan box size, or use vw) — not limited like object-position */
+  --splash-pan-x: 0%;
+  --splash-pan-y: 0%;
+}
+
+/* Wrapper so translate pans in screen space after img layout */
+.splash-bg-pan {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  transform: translate(var(--splash-pan-x), var(--splash-pan-y));
 }
 
 .splash-bg-photo {
@@ -61,9 +75,11 @@
 
 @media (max-width: 640px) {
   .splash-bg-image {
-    --splash-focal-x: 58%;
+    --splash-focal-x: 50%;
     --splash-focal-y: 56%;
     --splash-bg-zoom: 1.15;
+    --splash-pan-x: 0%;
+    --splash-pan-y: 0%;
   }
 }
 
