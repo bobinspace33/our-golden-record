@@ -1,6 +1,8 @@
 (function () {
   /** Must stay in sync with `.splash-bg-blackout`/`--splash-blackout-duration` in splash.css */
   const BLACKOUT_REVEAL_MS = 9000;
+  /** If buffering is slow, don’t extend black screen indefinitely; fade + play() anyway. */
+  const SPLASH_AUDIO_READY_MAX_WAIT_MS = 2800;
   const EXIT_FADE_MS = 5000;
   /** Fully visible hold after slide-in completes. */
   const MUSIC_CREDIT_HOLD_MS = 5000;
@@ -21,8 +23,10 @@
   let musicCreditHoldTimer = null;
   let musicCreditOutTimer = null;
   let musicCreditEndTimer = null;
-  let splashBlackoutKickDone = false;
-  let blackoutAlignFallbackTimer = null;
+  let splashRevealStarted = false;
+  let splashRevealMaxWaitTimer = null;
+  /** Started via muted autoplay; next non-title gesture unmutes audibly without restarting. */
+  let splashAwaitingGestureUnmute = false;
   function flashDurationMs() {
     return 200 + Math.random() * 700;
   }
@@ -85,18 +89,60 @@
 
   function beginSplashMusicAttempt(showCreditWhenPlaying) {
     if (!splashMusic) return;
-    void kickSplashMusicCycle(showCreditWhenPlaying).catch(() => {});
+    startSplashPlaybackForReveal(showCreditWhenPlaying);
+  }
+
+  /** Unmuted autoplay where allowed; otherwise muted autoplay until a tap outside the title unmutes. */
+  function startSplashPlaybackForReveal(showCredit) {
+    if (!splashMusic) return;
+    splashMusic.volume = 1;
+    splashAwaitingGestureUnmute = false;
+    splashMusic.muted = false;
+    const p = splashMusic.play();
+    const onPlayed = () => {
+      if (showCredit) scheduleMusicCredit();
+    };
+    if (p && typeof p.then === "function") {
+      void p.then(onPlayed).catch(() => {
+        splashMusic.muted = true;
+        const p2 = splashMusic.play();
+        const onMutedPlaying = () => {
+          splashAwaitingGestureUnmute = true;
+          if (showCredit) scheduleMusicCredit();
+        };
+        if (p2 && typeof p2.then === "function") {
+          void p2.then(onMutedPlaying).catch(() => {});
+        } else {
+          onMutedPlaying();
+        }
+      });
+    } else {
+      onPlayed();
+    }
   }
 
   /**
-   * Most browsers block autoplay without a user gesture. pointerdown/keydown fires before a KONSULT click,
-   * so play() succeeds in gesture context.
+   * Never runs for `.splash-enter` taps so clicking KONSULT does not trigger play() right before exit.
    */
   function bindSplashMusicUserPlayback() {
     if (!splashMusic) return;
 
-    function tryPlaybackFromGesture() {
+    function gestureTargetOutsideTitle(ev) {
+      const t = ev.target;
+      if (t && typeof t.closest === "function" && t.closest(".splash-enter")) return false;
+      return true;
+    }
+
+    function tryPlaybackFromGesture(ev) {
       if (document.body.classList.contains("splash-exiting")) return;
+      if (!gestureTargetOutsideTitle(ev)) return;
+
+      if (splashAwaitingGestureUnmute) {
+        splashMusic.muted = false;
+        splashMusic.volume = 1;
+        splashAwaitingGestureUnmute = false;
+        return;
+      }
       if (!splashMusic.paused) return;
       void kickSplashMusicCycle(true).catch(() => {});
     }
@@ -109,52 +155,58 @@
     });
   }
 
-  /** Fire when `.splash-bg-blackout` fade begins (`defer` scripts may attach after animationstart — cover that). */
-  function alignSplashMusicToBlackoutStart() {
-    if (!splashMusic) return;
-
-    function kickOnceBlackoutBegins() {
-      if (splashBlackoutKickDone) return;
-      splashBlackoutKickDone = true;
-      if (blackoutAlignFallbackTimer != null) {
-        window.clearTimeout(blackoutAlignFallbackTimer);
-        blackoutAlignFallbackTimer = null;
-      }
-      beginSplashMusicAttempt(true);
+  /** Start fade + timeline + music together once the track can buffer enough to play (`canplay`) or deadline hits. */
+  function beginSplashRevealAndMusic(blackoutEl) {
+    if (splashRevealStarted) return;
+    splashRevealStarted = true;
+    if (splashRevealMaxWaitTimer != null) {
+      window.clearTimeout(splashRevealMaxWaitTimer);
+      splashRevealMaxWaitTimer = null;
+    }
+    if (blackoutEl) {
+      blackoutEl.classList.add("splash-bg-blackout--reveal");
     }
 
-    const blackout = document.querySelector(".splash-bg-blackout");
-    if (!blackout) {
-      kickOnceBlackoutBegins();
+    stopRevealTimer();
+    revealTimer = window.setTimeout(() => {
+      revealTimer = null;
+      startInteractivePhase();
+    }, BLACKOUT_REVEAL_MS);
+
+    beginSplashMusicAttempt(true);
+  }
+
+  function armSplashRevealWhenAudioReady() {
+    const blackoutEl = document.querySelector(".splash-bg-blackout");
+
+    if (!splashMusic) {
+      beginSplashRevealAndMusic(blackoutEl);
       return;
     }
 
-    blackout.addEventListener(
-      "animationstart",
-      (ev) => {
-        if (ev.animationName !== "splash-bg-reveal") return;
-        kickOnceBlackoutBegins();
+    if (splashMusic.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      beginSplashRevealAndMusic(blackoutEl);
+      return;
+    }
+
+    splashRevealMaxWaitTimer = window.setTimeout(() => {
+      splashRevealMaxWaitTimer = null;
+      beginSplashRevealAndMusic(blackoutEl);
+    }, SPLASH_AUDIO_READY_MAX_WAIT_MS);
+
+    splashMusic.addEventListener(
+      "canplay",
+      () => {
+        beginSplashRevealAndMusic(blackoutEl);
       },
-      false
+      { once: true }
     );
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const cs = window.getComputedStyle(blackout);
-        if (
-          cs.animationName === "splash-bg-reveal" &&
-          (cs.animationPlayState === "running" || cs.animationPlayState === "pending")
-        ) {
-          kickOnceBlackoutBegins();
-        }
-      });
-    });
-
-    blackoutAlignFallbackTimer = window.setTimeout(() => kickOnceBlackoutBegins(), 120);
   }
 
   function fadeSplashMusicOut(durationMs) {
     if (!splashMusic || splashMusicFadeRaf != null) return;
+    splashMusic.muted = false;
+    splashAwaitingGestureUnmute = false;
     splashMusicFadeStartVol = splashMusic.volume;
     const start = performance.now();
 
@@ -178,6 +230,9 @@
   function kickSplashMusicCycle(showCreditWhenPlaying) {
     if (!splashMusic) return Promise.resolve();
     splashMusic.loop = false;
+    splashAwaitingGestureUnmute = false;
+    splashMusic.muted = false;
+    splashMusic.volume = splashMusic.volume > 0 ? splashMusic.volume : 1;
     const p = splashMusic.play();
     if (p && typeof p.then === "function") {
       return p.then(() => {
@@ -268,10 +323,6 @@
     });
   }
 
-  revealTimer = window.setTimeout(() => {
-    revealTimer = null;
-    startInteractivePhase();
-  }, BLACKOUT_REVEAL_MS);
 
   if (splashMusic) {
     bindSplashMusicUserPlayback();
@@ -280,15 +331,16 @@
       void kickSplashMusicCycle(true).catch(() => {});
     });
     splashMusic.volume = 1;
-    alignSplashMusicToBlackoutStart();
   }
+
+  armSplashRevealWhenAudioReady();
 
   window.addEventListener("pagehide", () => {
     stopLetterFlashLoop();
     stopRevealTimer();
-    if (blackoutAlignFallbackTimer != null) {
-      window.clearTimeout(blackoutAlignFallbackTimer);
-      blackoutAlignFallbackTimer = null;
+    if (splashRevealMaxWaitTimer != null) {
+      window.clearTimeout(splashRevealMaxWaitTimer);
+      splashRevealMaxWaitTimer = null;
     }
     cancelMusicCreditTimers();
     if (splashMusicFadeRaf != null) {

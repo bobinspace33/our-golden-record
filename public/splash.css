@@ -118,10 +118,14 @@
   z-index: 2;
   background: #000;
   pointer-events: none;
+  opacity: 1;
   --splash-blackout-duration: 9s;
-  animation: splash-bg-reveal var(--splash-blackout-duration) ease-out forwards;
 }
 
+/* Reveal starts only after JS confirms audio can play (or max-wait fires) — avoids silent fade long before sound. */
+.splash-bg-blackout.splash-bg-blackout--reveal {
+  animation: splash-bg-reveal var(--splash-blackout-duration) ease-out forwards;
+}
 @keyframes splash-bg-reveal {
   from {
     opacity: 1;
