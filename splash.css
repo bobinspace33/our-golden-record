@@ -106,13 +106,15 @@
 .splash-title-block {
   width: 100%;
   max-width: 100%;
-  /* Title scale; subtitle uses 0.5em for ~half the cap height */
-  font-size: clamp(2.5rem, 12vw, 128pt);
+  /* Shared with subtitle — do not set font-size here: h1 defaults to 2em and would scale the title incorrectly */
+  --splash-title-fs: clamp(2.5rem, 12vw, 128pt);
 }
 
 .splash-title-line {
   margin: 0;
   line-height: 1;
+  font-size: 1rem;
+  font-weight: 400;
 }
 
 /* Letters-only box; arrow is position:absolute so it never shifts the title */
@@ -128,7 +130,7 @@
   border-radius: 0.25rem;
   font-family: "Cal Sans", "Gill Sans", system-ui, sans-serif;
   font-weight: 400;
-  font-size: 1em;
+  font-size: var(--splash-title-fs);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -186,7 +188,8 @@ body.splash-interactive .splash-arrow {
   padding: 0;
   font-family: "Comfortaa", system-ui, sans-serif;
   font-weight: 400;
-  font-size: 0.5em;
+  /* Half of title cap size — only the subtitle scales with this, not the h1 */
+  font-size: calc(var(--splash-title-fs) * 0.5);
   line-height: 1.25;
   color: #f8f8f6;
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
