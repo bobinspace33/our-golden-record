@@ -122,7 +122,8 @@
   }
 
   /**
-   * Never runs for `.splash-enter` taps so clicking KONSULT does not trigger play() right before exit.
+   * Unmute-after-muted-autoplay applies to any gesture (including the title).
+   * Restart via kickSplashMusicCycle is skipped for `.splash-enter` — exit handles that click.
    */
   function bindSplashMusicUserPlayback() {
     if (!splashMusic) return;
@@ -135,14 +136,17 @@
 
     function tryPlaybackFromGesture(ev) {
       if (document.body.classList.contains("splash-exiting")) return;
-      if (!gestureTargetOutsideTitle(ev)) return;
 
+      /* Must run before title exclusion — muted autoplay otherwise stays silent until user taps outside the wordmark. */
       if (splashAwaitingGestureUnmute) {
         splashMusic.muted = false;
         splashMusic.volume = 1;
         splashAwaitingGestureUnmute = false;
         return;
       }
+
+      if (!gestureTargetOutsideTitle(ev)) return;
+
       if (!splashMusic.paused) return;
       void kickSplashMusicCycle(true).catch(() => {});
     }
@@ -288,6 +292,12 @@
     stopRevealTimer();
     cancelMusicCreditTimers();
     resetMusicCreditVisually();
+
+    if (splashMusic && splashAwaitingGestureUnmute) {
+      splashMusic.muted = false;
+      splashMusic.volume = 1;
+      splashAwaitingGestureUnmute = false;
+    }
 
     fadeSplashMusicOut(EXIT_FADE_MS);
 

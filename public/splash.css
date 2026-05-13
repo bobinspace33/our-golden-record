@@ -327,6 +327,12 @@ body.splash-interactive .splash-arrow {
   color: #f8f8f6;
   text-shadow: 0 1px 18px rgba(0, 0, 0, 0.35);
   max-width: min(36em, 100%);
+  opacity: 1;
+  transition: opacity 5s ease-in-out;
+}
+
+.splash-body.splash-exiting .splash-subtitle {
+  opacity: 0;
 }
 
 /* Optional logo above title */
