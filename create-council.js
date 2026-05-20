@@ -1107,8 +1107,13 @@ async function suggestPhases() {
         existingPhases,
       }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Request failed");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const base = data.error || `Request failed (${res.status})`;
+      const snippet =
+        typeof data.raw === "string" && data.raw.trim().length ? ` (${data.raw.replace(/\s+/g, " ").trim().slice(0, 100)}…)` : "";
+      throw new Error(`${base}${snippet}`);
+    }
     if (data.phases?.length) {
       state.phases = data.phases.map((p) => ({
         title: p.title || "",

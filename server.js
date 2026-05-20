@@ -677,6 +677,33 @@ function extractBalancedJsonObjectSlice(s, startIdx) {
   return null;
 }
 
+/** Same as `{` balancing for objects, but for `[` … `]` (nested arrays OK). */
+function extractBalancedJsonArraySlice(s, startIdx) {
+  if (!s || startIdx < 0 || startIdx >= s.length || s[startIdx] !== "[") return null;
+  let depth = 0;
+  let inStr = false;
+  let escaped = false;
+  for (let i = startIdx; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === "\"") inStr = false;
+      continue;
+    }
+    if (c === "\"") {
+      inStr = true;
+      continue;
+    }
+    if (c === "[") depth++;
+    else if (c === "]") {
+      depth--;
+      if (depth === 0) return s.slice(startIdx, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJsonFromModelText(text) {
   if (!text || typeof text !== "string") return null;
   let trimmed = text.trim();
@@ -697,6 +724,59 @@ function parseJsonFromModelText(text) {
     } catch {
       /* try next */
     }
+  }
+  return null;
+}
+
+/**
+ * Gemini sometimes returns only `[{...}]` — object-oriented parseJsonFromModelText misses that.
+ * Use only when callers expect a JSON array inside model text that may carry prose preamble.
+ */
+function extractJsonArrayFromModelText(text) {
+  if (!text || typeof text !== "string") return null;
+  let trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/im);
+  if (fenced) trimmed = fenced[1].trim();
+  else trimmed = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/m, "").trim();
+  const firstBracket = trimmed.indexOf("[");
+  const firstBrace = trimmed.indexOf("{");
+  const useArray =
+    firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace || extractBalancedJsonObjectSlice(trimmed, firstBrace) === null);
+  if (!useArray || firstBracket === -1) return null;
+  const slice = extractBalancedJsonArraySlice(trimmed, firstBracket);
+  if (!slice) return null;
+  try {
+    const arr = JSON.parse(slice);
+    return Array.isArray(arr) ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Gemini sometimes uses alternate keys for phases (or returns an array at `.phases`). */
+function pickPhasesArrayFromParsed(parsed) {
+  if (!parsed) return null;
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof parsed !== "object") return null;
+  if (Array.isArray(parsed.phases)) return parsed.phases;
+  const altKeys = [
+    "Phases",
+    "phase_list",
+    "phaseList",
+    "project_phases",
+    "projectPhases",
+    "suggested_phases",
+    "suggestedPhases",
+    "proposedPhases",
+    "proposal",
+    "slots",
+    "items",
+    "fills",
+    "generated_phases",
+    "responses",
+  ];
+  for (const k of altKeys) {
+    if (Array.isArray(parsed[k])) return parsed[k];
   }
   return null;
 }
@@ -1008,10 +1088,14 @@ Reply with ONLY valid JSON (no markdown). The "phases" array must have exactly $
   try {
     const text = await geminiGenerateText(ai, prompt);
     const parsedJson = parseJsonFromModelText(text);
-    if (!parsedJson?.phases || !Array.isArray(parsedJson.phases)) {
+    let phasesArr = pickPhasesArrayFromParsed(parsedJson);
+    if (!phasesArr) {
+      phasesArr = extractJsonArrayFromModelText(text);
+    }
+    if (!phasesArr || !Array.isArray(phasesArr)) {
       return res.status(422).json({ error: "Could not parse phases.", raw: text.slice(0, 500) });
     }
-    const newOnes = parsedJson.phases.slice(0, fillCount);
+    const newOnes = phasesArr.slice(0, fillCount);
     while (newOnes.length < fillCount) {
       newOnes.push({ title: "", description: "" });
     }
