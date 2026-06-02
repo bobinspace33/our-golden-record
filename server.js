@@ -6,7 +6,7 @@ import WordExtractor from "word-extractor";
 import express from "express";
 import cors from "cors";
 import { GoogleGenAI, createUserContent, createPartFromBase64 } from "@google/genai";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -71,9 +71,11 @@ app.get("/api/debug", (req, res) => {
 });
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-/** Council chat (`/api/chat`, `/api/chat/custom`) uses OpenAI Responses API. */
-const OPENAI_CHAT_MODEL = (process.env.OPENAI_CHAT_MODEL || "gpt-5.2").trim();
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+/** Council chat (`/api/chat`, `/api/chat/custom`) uses Claude Messages API. */
+const ANTHROPIC_CHAT_MODEL = (
+  process.env.ANTHROPIC_CHAT_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929"
+).trim();
 const PORT = process.env.PORT || 3000;
 
 /** Gemini native image ("Nano Banana") — see https://ai.google.dev/gemini-api/docs/image-generation */
@@ -114,7 +116,7 @@ const GEMINI_CREATOR_MODEL_CHAIN = dedupeModelChain(
 );
 
 /**
- * Legacy/fallback: comma-separated Gemini model ids referenced only outside council chat (unused there once OpenAI is wired).
+ * Legacy/fallback: comma-separated Gemini model ids for non-chat routes (creator, brief analysis, etc.).
  * Example: GEMINI_CHAT_MODEL_CHAIN=gemini-2.0-flash,gemini-2.5-flash-lite
  */
 const GEMINI_CHAT_MODEL_CHAIN = dedupeModelChain(
@@ -331,50 +333,47 @@ async function uploadDocForGem(ai, relativePath) {
   return out;
 }
 
-/** Cache OpenAI file ids per document path + revision (mtime/size). */
-const openAiDocFileIdCache = new Map();
+/** Cache Claude document/text blocks per documents/ path + revision (mtime/size). */
+const anthropicDocBlockCache = new Map();
 
-function getOpenAIClient() {
-  const k = OPENAI_API_KEY && String(OPENAI_API_KEY).trim();
+function getAnthropicClient() {
+  const k = ANTHROPIC_API_KEY && String(ANTHROPIC_API_KEY).trim();
   if (!k) return null;
-  return new OpenAI({ apiKey: k });
+  return new Anthropic({ apiKey: k });
 }
 
-function openAiBrowserAttachmentToContentPart(a) {
+function extractAnthropicResponseText(response) {
+  const parts = [];
+  for (const block of response?.content || []) {
+    if (block?.type === "text" && typeof block.text === "string") parts.push(block.text);
+  }
+  return parts.join("").trim();
+}
+
+/** Browser upload → Claude message content block (image or PDF). */
+function anthropicBrowserAttachmentToContentBlock(a) {
   if (!a || typeof a.data !== "string" || !a.mimeType) return null;
   const mime = String(a.mimeType).toLowerCase();
   const data = a.data;
   if (mime.startsWith("image/")) {
-    return { type: "input_image", image_url: `data:${mime};base64,${data}` };
+    return {
+      type: "image",
+      source: { type: "base64", media_type: mime, data },
+    };
   }
-  const ext =
-    mime === "application/pdf"
-      ? "pdf"
-      : mime.includes("csv")
-        ? "csv"
-        : mime.includes("markdown") || mime === "text/markdown"
-          ? "md"
-          : mime.includes("html")
-            ? "html"
-            : "txt";
-  return {
-    type: "input_file",
-    filename: `attachment.${ext}`,
-    file_data: `data:${mime};base64,${data}`,
-  };
-}
-
-function extractOpenAiResponseText(response) {
-  const direct = response?.output_text;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  const parts = [];
-  for (const item of response?.output || []) {
-    if (item?.type !== "message" || !Array.isArray(item.content)) continue;
-    for (const c of item.content) {
-      if (typeof c?.text === "string") parts.push(c.text);
-    }
+  if (mime === "application/pdf") {
+    return {
+      type: "document",
+      source: { type: "base64", media_type: "application/pdf", data },
+    };
   }
-  return parts.join("").trim();
+  let text = "";
+  try {
+    text = Buffer.from(data, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+  return { type: "text", text: `[Attached file]\n${text.slice(0, 120_000)}` };
 }
 
 /** Rotate follow-up “lanes” so parallel advisors don’t all suggest the same kind of place. */
@@ -561,40 +560,50 @@ function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn, grade
   return `\n\n[Council context — stay distinct]\nYou are **${selfName}**, ${selfTitle}. Answer only as this voice: prioritize lenses, examples, and caveats that fit **${selfTitle}** work—not a neutral essay.\n\nOther advisors answering the same student message:\n${lines.join("\n")}\n\nDifferentiation:\n- Use a different opening move and structure than generic council replies; avoid mirrored introductions.\n- Do not repeat the same “first step,” metaphor, or checklist another advisor would plausibly give.\n- If topics overlap, narrow harder into your specialty and lift **one** concrete angle only your role would stress.\n\nHonesty and referrals:\n- If you are unsure, say so plainly.\n- If the topic is mostly outside your specialty, say that openly. Point to another advisor **by name** (from the list above) whose lens fits better, or suggest a type of local professional or organization near the user.\n`;
 }
 
-async function openAiEnsureDocFileId(client, relativePath) {
+async function anthropicCouncilDocContentBlock(relativePath) {
   const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\))+/, "");
   const absPath = path.join(DOCUMENTS_DIR, normalized);
   const ext = path.extname(absPath).toLowerCase();
   if (!SUPPORTED_DOC_EXTENSIONS.has(ext)) return null;
   if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
-    console.warn(`OpenAI doc skip (missing): ${relativePath}`);
+    console.warn(`Claude doc skip (missing): ${relativePath}`);
     return null;
   }
   const st = fs.statSync(absPath);
   const cacheKey = `${absPath}:${st.size}:${st.mtimeMs}`;
-  const existing = openAiDocFileIdCache.get(cacheKey);
+  const existing = anthropicDocBlockCache.get(cacheKey);
   if (existing) return existing;
-  const pending = client.files
-    .create({ file: fs.createReadStream(absPath), purpose: "user_data" })
-    .then((f) => f.id)
-    .catch((e) => {
-      openAiDocFileIdCache.delete(cacheKey);
-      throw e;
-    });
-  openAiDocFileIdCache.set(cacheKey, pending);
+  const pending = (async () => {
+    const mimeType = MIME_BY_EXT[ext] || "application/octet-stream";
+    if (ext === ".pdf") {
+      const data = fs.readFileSync(absPath).toString("base64");
+      return {
+        type: "document",
+        source: { type: "base64", media_type: mimeType, data },
+      };
+    }
+    const text = fs.readFileSync(absPath, "utf8");
+    const name = path.basename(absPath);
+    return { type: "text", text: `[Reference document: ${name}]\n${text.slice(0, 120_000)}` };
+  })().catch((e) => {
+    anthropicDocBlockCache.delete(cacheKey);
+    throw e;
+  });
+  anthropicDocBlockCache.set(cacheKey, pending);
   return pending;
 }
 
-async function openAiCompleteCouncilTurn(client, { instructions, userContentParts, gradeLevel }) {
+async function anthropicCompleteCouncilTurn(client, { instructions, userContentBlocks, gradeLevel }) {
   const globalBlock = buildOpenAiChatGlobalEducationGuidance(gradeLevel ?? "6-8");
   const mergedInstructions = [globalBlock, instructions].filter(Boolean).join("\n\n");
-  const response = await client.responses.create({
-    model: OPENAI_CHAT_MODEL,
-    instructions: mergedInstructions || undefined,
-    input: [{ role: "user", content: userContentParts }],
+  const response = await client.messages.create({
+    model: ANTHROPIC_CHAT_MODEL,
+    max_tokens: 4096,
+    system: mergedInstructions || undefined,
+    messages: [{ role: "user", content: userContentBlocks }],
   });
-  const text = extractOpenAiResponseText(response);
-  if (!text.trim()) throw new Error("OpenAI returned no text.");
+  const text = extractAnthropicResponseText(response);
+  if (!text.trim()) throw new Error("Claude returned no text.");
   return text;
 }
 
@@ -996,8 +1005,8 @@ app.get("/api/creator/health", (req, res) => {
   res.json({
     ok: true,
     hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
-    hasOpenAiKey: Boolean(OPENAI_API_KEY && String(OPENAI_API_KEY).trim()),
-    openAiChatModel: OPENAI_CHAT_MODEL,
+    hasAnthropicKey: Boolean(ANTHROPIC_API_KEY && String(ANTHROPIC_API_KEY).trim()),
+    anthropicChatModel: ANTHROPIC_CHAT_MODEL,
     creatorModelChain: GEMINI_CREATOR_MODEL_CHAIN,
     chatModelChain: GEMINI_CHAT_MODEL_CHAIN,
     vercel: Boolean(process.env.VERCEL),
@@ -2598,9 +2607,9 @@ function buildCustomCouncilContext(councilProject) {
 }
 
 app.post("/api/chat/custom", async (req, res) => {
-  const openai = getOpenAIClient();
-  if (!openai) {
-    return res.status(503).json({ error: "Server missing OPENAI_API_KEY. Add it to .env and restart." });
+  const anthropic = getAnthropicClient();
+  if (!anthropic) {
+    return res.status(503).json({ error: "Server missing ANTHROPIC_API_KEY. Add it to .env and restart." });
   }
 
   const {
@@ -2649,11 +2658,11 @@ app.post("/api/chat/custom", async (req, res) => {
 
   const projectContext = buildCustomCouncilContext(councilProject);
 
-  const attachmentContentParts = [];
+  const attachmentContentBlocks = [];
   if (hasAttachments) {
     for (const a of rawAttachments) {
-      const p = openAiBrowserAttachmentToContentPart(a);
-      if (p) attachmentContentParts.push(p);
+      const p = anthropicBrowserAttachmentToContentBlock(a);
+      if (p) attachmentContentBlocks.push(p);
     }
   }
 
@@ -2691,9 +2700,9 @@ app.post("/api/chat/custom", async (req, res) => {
     toRun.map(async (gem) => {
       try {
         const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
-        const userContentParts = [
-          ...attachmentContentParts,
-          { type: "input_text", text: projectContext + "\n" + coreUserPrompt + followInstr },
+        const userContentBlocks = [
+          ...attachmentContentBlocks,
+          { type: "text", text: projectContext + "\n" + coreUserPrompt + followInstr },
         ];
         const peerBlock = buildOpenAiPeerDifferentiationBlock(
           toRun,
@@ -2707,7 +2716,11 @@ app.post("/api/chat/custom", async (req, res) => {
           (gem.systemInstruction || "") +
           peerBlock +
           `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
-        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts, gradeLevel: gradeLevelNorm });
+        const text = await anthropicCompleteCouncilTurn(anthropic, {
+          instructions,
+          userContentBlocks,
+          gradeLevel: gradeLevelNorm,
+        });
         results.push({
           gemId: gem.id,
           name: gem.name,
@@ -2734,9 +2747,9 @@ app.post("/api/chat/custom", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const openai = getOpenAIClient();
-  if (!openai) {
-    return res.status(503).json({ error: "Server missing OPENAI_API_KEY. Add it to .env and restart." });
+  const anthropic = getAnthropicClient();
+  if (!anthropic) {
+    return res.status(503).json({ error: "Server missing ANTHROPIC_API_KEY. Add it to .env and restart." });
   }
 
   const { selectedGems = [], prompt, attachments: rawAttachments, followUpPreviousResponse, opinionOnResponse } = req.body;
@@ -2771,23 +2784,23 @@ app.post("/api/chat", async (req, res) => {
   const gemConfigs = GEMS.filter((g) => selectedSet.has(Number(g.id)));
 
   const allDocPaths = new Set(gemConfigs.flatMap((g) => (Array.isArray(g.documents) ? g.documents : [])));
-  const uploadedDocIds = new Map();
+  const councilDocBlocks = new Map();
   await Promise.all(
     [...allDocPaths].map(async (rel) => {
       try {
-        const id = await openAiEnsureDocFileId(openai, rel);
-        if (id) uploadedDocIds.set(rel, id);
+        const block = await anthropicCouncilDocContentBlock(rel);
+        if (block) councilDocBlocks.set(rel, block);
       } catch (e) {
-        console.warn(`OpenAI file upload skipped: ${rel}`, e.message);
+        console.warn(`Claude council doc skipped: ${rel}`, e.message);
       }
     })
   );
 
-  const attachmentContentParts = [];
+  const attachmentContentBlocks = [];
   if (hasAttachments) {
     for (const a of rawAttachments) {
-      const p = openAiBrowserAttachmentToContentPart(a);
-      if (p) attachmentContentParts.push(p);
+      const p = anthropicBrowserAttachmentToContentBlock(a);
+      if (p) attachmentContentBlocks.push(p);
     }
   }
 
@@ -2797,14 +2810,14 @@ app.post("/api/chat", async (req, res) => {
     gemConfigs.map(async (gem) => {
       try {
         const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
-        const userContentParts = [];
+        const userContentBlocks = [];
         const docPaths = Array.isArray(gem.documents) ? gem.documents : [];
         for (const rel of docPaths) {
-          const fid = uploadedDocIds.get(rel);
-          if (fid) userContentParts.push({ type: "input_file", file_id: fid });
+          const block = councilDocBlocks.get(rel);
+          if (block) userContentBlocks.push(block);
         }
-        for (const p of attachmentContentParts) userContentParts.push(p);
-        userContentParts.push({ type: "input_text", text: coreUserPrompt + followInstr });
+        for (const p of attachmentContentBlocks) userContentBlocks.push(p);
+        userContentBlocks.push({ type: "text", text: coreUserPrompt + followInstr });
 
         const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name, "6-8");
         const jt = JOB_TITLES[gem.name] || gem.name;
@@ -2814,7 +2827,11 @@ app.post("/api/chat", async (req, res) => {
           peerBlock +
           `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
 
-        const text = await openAiCompleteCouncilTurn(openai, { instructions, userContentParts, gradeLevel: "6-8" });
+        const text = await anthropicCompleteCouncilTurn(anthropic, {
+          instructions,
+          userContentBlocks,
+          gradeLevel: "6-8",
+        });
         results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
       } catch (err) {
         results.push({
@@ -2836,8 +2853,8 @@ if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
     if (!GEMINI_API_KEY) console.warn("Warning: GEMINI_API_KEY not set. Creator flows need GEMINI_API_KEY.");
-    if (!OPENAI_API_KEY || !String(OPENAI_API_KEY).trim())
-      console.warn("Warning: OPENAI_API_KEY not set. Council chat needs OPENAI_API_KEY.");
+    if (!ANTHROPIC_API_KEY || !String(ANTHROPIC_API_KEY).trim())
+      console.warn("Warning: ANTHROPIC_API_KEY not set. Council chat needs ANTHROPIC_API_KEY.");
   });
 }
 

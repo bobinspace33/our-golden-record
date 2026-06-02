@@ -9,11 +9,11 @@
     "build": "node scripts/copy-public-to-root.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@google/genai": "^1.41.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "openai": "^6.36.0",
     "word-extractor": "^1.0.4"
   }
 }
