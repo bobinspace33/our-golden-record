@@ -10,10 +10,14 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body data-app="custom">
+  <header class="council-top-bar" aria-label="Site">
+    <div class="council-top-bar-start">
+      <a href="/home.html" class="council-top-logo">KONSULT</a>
+      <a href="/home.html" class="council-top-home-btn">Home</a>
+    </div>
+    <span class="council-top-copyright">© Bob Kelly 2025</span>
+  </header>
   <div class="layout">
-    <nav class="site-nav" aria-label="Site">
-      <a href="/home.html" class="site-nav-link">← All councils</a>
-    </nav>
     <header class="header">
       <div class="header-row">
         <h1 id="councilPageTitle">Your PBL Council</h1>
@@ -48,9 +52,12 @@
       </div>
     </section>
 
-    <div class="phase-milestone-banner" id="phaseMilestoneBanner" role="region" aria-labelledby="phaseMilestoneBannerHeading" aria-live="polite">
-      <p class="phase-milestone-banner-heading" id="phaseMilestoneBannerHeading">Milestone for this phase</p>
-      <p class="phase-milestone-banner-text" id="phaseMilestoneBannerText">—</p>
+    <div class="phase-milestone-block">
+      <h2 class="phase-project-title" id="phaseProjectTitle" aria-live="polite">—</h2>
+      <div class="phase-milestone-banner" id="phaseMilestoneBanner" role="region" aria-labelledby="phaseMilestoneBannerHeading" aria-live="polite">
+        <p class="phase-milestone-banner-heading" id="phaseMilestoneBannerHeading">Milestone for this phase</p>
+        <p class="phase-milestone-banner-text" id="phaseMilestoneBannerText">—</p>
+      </div>
     </div>
 
     <section class="gems-section">
@@ -62,7 +69,17 @@
     </section>
 
     <section class="prompt-section">
-      <label for="promptInput">Your prompt</label>
+      <div class="prompt-section-header">
+        <label for="promptInput">Your prompt</label>
+        <div class="prompt-session-row" id="promptSessionRow" hidden>
+          <span class="prompt-session-label">Prompt uses this session</span>
+          <span class="prompt-session-checks" id="promptSessionChecks" aria-label="Daily prompts used in this session">
+            <span class="prompt-session-check" aria-hidden="true"></span>
+            <span class="prompt-session-check" aria-hidden="true"></span>
+            <span class="prompt-session-check" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
       <textarea
         id="promptInput"
         placeholder="Ask something… all selected members will answer."

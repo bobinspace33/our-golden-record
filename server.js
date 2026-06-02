@@ -76,6 +76,8 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const ANTHROPIC_CHAT_MODEL = (
   process.env.ANTHROPIC_CHAT_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5-20250929"
 ).trim();
+/** Set ANTHROPIC_PROMPT_CACHE=0 to disable ephemeral prompt caching on council chat. */
+const ANTHROPIC_PROMPT_CACHE_ENABLED = process.env.ANTHROPIC_PROMPT_CACHE !== "0";
 const PORT = process.env.PORT || 3000;
 
 /** Gemini native image ("Nano Banana") — see https://ai.google.dev/gemini-api/docs/image-generation */
@@ -180,7 +182,7 @@ async function geminiGenerateContentWithModelFallback(ai, modelCandidates, gener
 // Folder where Gem documents live. Put your PDFs, TXT, etc. here and reference them in GEMS[].documents.
 const DOCUMENTS_DIR = path.join(process.cwd(), "documents");
 
-/** Same basename as in GEMS[].documents; browser opens via GET /document/project-brief */
+/** Same basename as project brief; browser opens via GET /document/project-brief */
 const PROJECT_BRIEF_PDF = "Project Brief_Our Golden Record Draft 1.pdf";
 
 app.get("/document/project-brief", (req, res) => {
@@ -262,79 +264,16 @@ const PRE_LAUNCH_FALLBACK_SECTIONS = [
 //   Set model to "tunedModels/YOUR_MODEL_ID" and leave systemInstruction empty
 //   if the tuned model already defines the behavior. Set name to match your Gem.
 //
-// DOCUMENTS – To give a Gem access to files, add: documents: ["file.pdf", "subfolder/faq.txt"]
-//   Paths are relative to the project's "documents/" folder.
-// Each entry: id (1–5), name (shown in UI), model (base or tunedModels/...), systemInstruction (optional), documents (optional).
+// DOCUMENTS – PDFs in documents/ are used by the council creator (brief analysis) and
+// served to the browser (e.g. GET /document/project-brief). Council chat does not attach them.
+// Each entry: id (1–5), name (shown in UI), model, systemInstruction (optional).
 const GEMS = [
-  { id: 1, name: "Henrietta", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gems responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Job Title: Scientific Historian • Purpose: Links to Social Studies Theme 9: Science, Technology, and Innovation. • Function: This role provides domain-specific nonfiction' insights into how digital media survives in the cosmic environment and the history of interstellar space craft. It challenges students to think about the digital information they include in their records and the fundamental transition of the hydrogen atom used in the original Voyager playback instructions. • PBL Inquiry example: Which digital file formats are most likely to remain 'readable' for 40,000 years, and how does that influence your media choices?. #Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents.", documents: [
-    "ADA-Compliant-Math-Standards.pdf",
-    "AllDCI.pdf",
-    "ELA_Standards1.pdf",
-    PROJECT_BRIEF_PDF,
-    "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
-    "ss-framework-k-12-intro.pdf",
-  ] },
-  { id: 2, name: "Jane", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Job Title: Cultural Ethnographer • Purpose: Helps students navigate Social Studies Theme 1: Individual Development and Cultural Identity. Ensures the project follows the guiding principle to Center Community Voice and Design for Equity • Function: This role provides expert-created, adaptable materials to help students define the boundaries of their community. It prompts students during the Experiencing phase to move beyond stereotypes and identify artifacts that represent their community's unique social, political, and cultural interactions. This role provides the feedback and critique that supports revision. It analyzes the curated list to see if any diverse or multilingual backgrounds from the community were excluded. It helps students deconstruct their own point of view as curator. • PBL Inquiry examples: How does this specific artifact represent the lived experience of our neighborhood today? Whose story is not being told in this selection, and how does that gap affect the record’s authenticity? # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents.", documents: [
-    "ADA-Compliant-Math-Standards.pdf",
-    "AllDCI.pdf",
-    "ELA_Standards1.pdf",
-    PROJECT_BRIEF_PDF,
-    "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
-    "ss-framework-k-12-intro.pdf",
-  ] },
-  { id: 3, name: "Laika", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. # Job Title: Launch Visionary • Purpose: Facilitates the Reflecting phase of the learning cycle. • Function: This role helps students synthesize their multidisciplinary research into a meaningful and persuasive final presentation for the Launch Committee. It uses higher-order thought questions to help students reflect on their own learning process. • PBL Inquiry: Now that we are at the final milestone, what did you discover about your community that you didnt know when we started?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents", documents: [
-    "ADA-Compliant-Math-Standards.pdf",
-    "AllDCI.pdf",
-    "ELA_Standards1.pdf",
-    PROJECT_BRIEF_PDF,
-    "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
-    "ss-framework-k-12-intro.pdf",
-  ] },
-  { id: 4, name: "Wolfgang", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. The Data Budget Architect (The Math Specialist) • Purpose: Supports Mathematical Practice 4: Model with mathematics. • Function: This role is essential for the Data Budget Audit milestone. It helps students apply ratios and proportional reasoning to manage the 512 GB microSD card limit. It acts as a Data Analyst role, providing templates for calculating how much space a 4K video occupies compared to a high-fidelity audio track. • PBL Inquiry example: If your video artifacts take up 80% of the storage, how must you redistribute the remaining data budget for the ELA and Social Studies artifacts?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents", documents: [
-    "ADA-Compliant-Math-Standards.pdf",
-    "AllDCI.pdf",
-    "ELA_Standards1.pdf",
-    PROJECT_BRIEF_PDF,
-    "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
-    "ss-framework-k-12-intro.pdf",
-  ] },
-  { id: 5, name: "Carl", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research' criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. # Job Title: Interstellar Linguist • Purpose: Focuses on communicating with an external, sometimes unfamiliar audience • Function: Drawing on College and Career Readiness standards for Speaking and Listening, this role critiques how students use digital media to convey complex human concepts. It helps students deconstruct how images or sounds might be interpreted by a non-human entity. • PBL Inquiry example: If you have no shared language, how do these data communicate the concept of friendship?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents. # Personality You are wise and have an expansive view of the universe and a deep empathy toward all life. You are an astrophysicist but focus your work on human understanding of science and are devoted to peace, similar to Carl Sagan.", documents: [
-    "ADA-Compliant-Math-Standards.pdf",
-    "AllDCI.pdf",
-    "ELA_Standards1.pdf",
-    PROJECT_BRIEF_PDF,
-    "saavedra-rapaport-2024-key-lessons-from-research-about-project-based-teaching-and-learning.pdf",
-    "ss-framework-k-12-intro.pdf",
-  ] },
+  { id: 1, name: "Henrietta", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gems responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Job Title: Scientific Historian • Purpose: Links to Social Studies Theme 9: Science, Technology, and Innovation. • Function: This role provides domain-specific nonfiction' insights into how digital media survives in the cosmic environment and the history of interstellar space craft. It challenges students to think about the digital information they include in their records and the fundamental transition of the hydrogen atom used in the original Voyager playback instructions. • PBL Inquiry example: Which digital file formats are most likely to remain 'readable' for 40,000 years, and how does that influence your media choices?. #Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents." },
+  { id: 2, name: "Jane", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Job Title: Cultural Ethnographer • Purpose: Helps students navigate Social Studies Theme 1: Individual Development and Cultural Identity. Ensures the project follows the guiding principle to Center Community Voice and Design for Equity • Function: This role provides expert-created, adaptable materials to help students define the boundaries of their community. It prompts students during the Experiencing phase to move beyond stereotypes and identify artifacts that represent their community's unique social, political, and cultural interactions. This role provides the feedback and critique that supports revision. It analyzes the curated list to see if any diverse or multilingual backgrounds from the community were excluded. It helps students deconstruct their own point of view as curator. • PBL Inquiry examples: How does this specific artifact represent the lived experience of our neighborhood today? Whose story is not being told in this selection, and how does that gap affect the record’s authenticity? # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents." },
+  { id: 3, name: "Laika", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. # Job Title: Launch Visionary • Purpose: Facilitates the Reflecting phase of the learning cycle. • Function: This role helps students synthesize their multidisciplinary research into a meaningful and persuasive final presentation for the Launch Committee. It uses higher-order thought questions to help students reflect on their own learning process. • PBL Inquiry: Now that we are at the final milestone, what did you discover about your community that you didnt know when we started?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents" },
+  { id: 4, name: "Wolfgang", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. The Data Budget Architect (The Math Specialist) • Purpose: Supports Mathematical Practice 4: Model with mathematics. • Function: This role is essential for the Data Budget Audit milestone. It helps students apply ratios and proportional reasoning to manage the 512 GB microSD card limit. It acts as a Data Analyst role, providing templates for calculating how much space a 4K video occupies compared to a high-fidelity audio track. • PBL Inquiry example: If your video artifacts take up 80% of the storage, how must you redistribute the remaining data budget for the ELA and Social Studies artifacts?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents" },
+  { id: 5, name: "Carl", model: "gemini-2.5-flash", systemInstruction: "#Summary You are a member of the AI Council for Project: Our Golden Record. The mission is to represent a 21st-century community to extraterrestrial life. Your goal is to advise project team members as they work through the different phases of this PBL project. You must use the Assessment Criteria: Research, Argumentation, Technical Design, and Collaboration. # Core Directive The 80/20 Rule: 80% of the Gem’s responses must be questions or prompts for deeper thought; only 20% should be providing technical definitions or project context. Reference the Criteria: Instead of saying That's a good choice, the Gem should ask, How does this artifact help you meet the Authentic Research' criteria and avoid generalizations?. The Show Your Work Guardrail: If a student asks for a solution (e.g., What should we pick for our community?), the Gem must redirect: To help you decide, what are the three most important values your team identified in your Community Charter?. # Job Title: Interstellar Linguist • Purpose: Focuses on communicating with an external, sometimes unfamiliar audience • Function: Drawing on College and Career Readiness standards for Speaking and Listening, this role critiques how students use digital media to convey complex human concepts. It helps students deconstruct how images or sounds might be interpreted by a non-human entity. • PBL Inquiry example: If you have no shared language, how do these data communicate the concept of friendship?. # Audience/ Tone The project team members are middle-school students completing an interdisciplinary social studies project. Use age and grade-level appropriate language. You can use direct language taken from the standards documents. # Personality You are wise and have an expansive view of the universe and a deep empathy toward all life. You are an astrophysicist but focus your work on human understanding of science and are devoted to peace, similar to Carl Sagan." },
 ];
-
-// Resolves path relative to documents/ and uploads to Gemini; returns { uri, mimeType } or null if skipped (unsupported type).
-const fileUriCache = new Map();
-async function uploadDocForGem(ai, relativePath) {
-  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\))+/, "");
-  const absPath = path.join(DOCUMENTS_DIR, normalized);
-  const ext = path.extname(absPath).toLowerCase();
-  if (!SUPPORTED_DOC_EXTENSIONS.has(ext)) {
-    console.warn(`Skipping unsupported file type: ${relativePath} (Gemini does not support ${ext})`);
-    return null;
-  }
-  const cacheKey = absPath;
-  if (fileUriCache.has(cacheKey)) return fileUriCache.get(cacheKey);
-  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
-    throw new Error(`Document not found: ${relativePath} (resolved: ${absPath})`);
-  }
-  const mimeType = MIME_BY_EXT[ext];
-  const uploaded = await ai.files.upload({
-    file: absPath,
-    config: { mimeType },
-  });
-  const out = { uri: uploaded.uri ?? uploaded.name, mimeType: uploaded.mimeType ?? mimeType };
-  fileUriCache.set(cacheKey, out);
-  return out;
-}
-
-/** Cache Claude document/text blocks per documents/ path + revision (mtime/size). */
-const anthropicDocBlockCache = new Map();
 
 function getAnthropicClient() {
   const k = ANTHROPIC_API_KEY && String(ANTHROPIC_API_KEY).trim();
@@ -348,6 +287,59 @@ function extractAnthropicResponseText(response) {
     if (block?.type === "text" && typeof block.text === "string") parts.push(block.text);
   }
   return parts.join("").trim();
+}
+
+function anthropicEphemeralCacheControl() {
+  return { type: "ephemeral" };
+}
+
+/** Text block for the system array; optional cache breakpoint (≥1024 tokens in prefix required for hits). */
+function anthropicSystemTextBlock(text, useCache) {
+  const block = { type: "text", text: String(text || "") };
+  if (useCache && ANTHROPIC_PROMPT_CACHE_ENABLED && block.text) {
+    block.cache_control = anthropicEphemeralCacheControl();
+  }
+  return block;
+}
+
+/**
+ * Council chat turn with Anthropic prompt caching:
+ * - system: global rules + per-advisor instructions (cached suffix)
+ * - user: student attachments (if any), then dynamic prompt
+ */
+async function anthropicCompleteCouncilTurn(client, {
+  roleInstructions,
+  volatileUserBlocks = [],
+  dynamicUserText,
+  gradeLevel,
+}) {
+  const globalBlock = buildOpenAiChatGlobalEducationGuidance(gradeLevel ?? "6-8");
+  const system = [
+    anthropicSystemTextBlock(globalBlock, false),
+    anthropicSystemTextBlock(roleInstructions || "", true),
+  ].filter((b) => b.text.trim());
+
+  const userContent = [];
+  const volatile = Array.isArray(volatileUserBlocks) ? volatileUserBlocks.filter(Boolean) : [];
+  for (const block of volatile) userContent.push(block);
+
+  const dynamic = String(dynamicUserText || "").trim();
+  if (dynamic) {
+    userContent.push({ type: "text", text: dynamic });
+  } else if (!userContent.length) {
+    userContent.push({ type: "text", text: "(No prompt.)" });
+  }
+
+  const response = await client.messages.create({
+    model: ANTHROPIC_CHAT_MODEL,
+    max_tokens: 4096,
+    system: system.length ? system : undefined,
+    messages: [{ role: "user", content: userContent }],
+  });
+
+  const text = extractAnthropicResponseText(response);
+  if (!text.trim()) throw new Error("Claude returned no text.");
+  return text;
 }
 
 /** Browser upload → Claude message content block (image or PDF). */
@@ -393,7 +385,8 @@ function orderCouncilPeersForLanes(peers) {
 
 function normalizeCouncilGradeLevel(raw) {
   const s = String(raw ?? "").trim();
-  if (s === "3-5" || s === "6-8" || s === "HS" || s === "Uni+") return s;
+  if (s === "3-5") return "6-8";
+  if (s === "6-8" || s === "HS" || s === "Uni+") return s;
   return "6-8";
 }
 
@@ -422,7 +415,7 @@ function buildOpenAiChatGlobalEducationGuidance(gradeLevel) {
   const stayOnTopic =
     "Tone and purpose: encouraging coach and thoughtful advisor—challenge ideas with questions, never shame the learner. **Stay strictly on-topic** for the learner's project question; do not drift into unrelated subjects.";
 
-  if (g === "3-5" || g === "6-8") {
+  if (g === "6-8") {
     return `[Educational product — global rules for every reply]
 You are part of an AI council inside a **school project-based learning (PBL) tool**. Every answer must support teaching and learning in a classroom setting.
 
@@ -472,7 +465,7 @@ ${reflective}`;
 
 function customCouncilLexileTailInstruction(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
-  if (g === "3-5" || g === "6-8") {
+  if (g === "6-8") {
     return `Keep responses at roughly **grade 6 Lexile level** when appropriate (clear, concrete language matching upper-elementary / middle school expectations).`;
   }
   if (g === "HS") {
@@ -483,7 +476,7 @@ function customCouncilLexileTailInstruction(gradeLevel) {
 
 function geminiSuggestMembersToneBullet(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
-  if (g === "3-5" || g === "6-8") {
+  if (g === "6-8") {
     return `- Tone: supportive coach for grades 6–8; mostly questions and prompts rather than lectures; avoid repeating boilerplate across members.`;
   }
   if (g === "HS") {
@@ -494,7 +487,7 @@ function geminiSuggestMembersToneBullet(gradeLevel) {
 
 function rubricAudienceDescriptorForGrade(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
-  if (g === "3-5" || g === "6-8") return "upper-elementary through middle-grades (about grades 3–8)";
+  if (g === "6-8") return "middle grades (about grades 6–8)";
   if (g === "HS") return "high school (about grades 9–12)";
   return "advanced learners including university students";
 }
@@ -502,7 +495,6 @@ function rubricAudienceDescriptorForGrade(gradeLevel) {
 function preLaunchTeacherGradeLine(gradeLevel) {
   const g = normalizeCouncilGradeLevel(gradeLevel);
   const map = {
-    "3-5": "Grades 3–5 (elementary)",
     "6-8": "Grades 6–8 (middle school)",
     HS: "High school",
     "Uni+": "University / advanced",
@@ -560,51 +552,59 @@ function buildOpenAiPeerDifferentiationBlock(peers, currentId, jobTitleFn, grade
   return `\n\n[Council context — stay distinct]\nYou are **${selfName}**, ${selfTitle}. Answer only as this voice: prioritize lenses, examples, and caveats that fit **${selfTitle}** work—not a neutral essay.\n\nOther advisors answering the same student message:\n${lines.join("\n")}\n\nDifferentiation:\n- Use a different opening move and structure than generic council replies; avoid mirrored introductions.\n- Do not repeat the same “first step,” metaphor, or checklist another advisor would plausibly give.\n- If topics overlap, narrow harder into your specialty and lift **one** concrete angle only your role would stress.\n\nHonesty and referrals:\n- If you are unsure, say so plainly.\n- If the topic is mostly outside your specialty, say that openly. Point to another advisor **by name** (from the list above) whose lens fits better, or suggest a type of local professional or organization near the user.\n`;
 }
 
-async function anthropicCouncilDocContentBlock(relativePath) {
-  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\))+/, "");
-  const absPath = path.join(DOCUMENTS_DIR, normalized);
-  const ext = path.extname(absPath).toLowerCase();
-  if (!SUPPORTED_DOC_EXTENSIONS.has(ext)) return null;
-  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isFile()) {
-    console.warn(`Claude doc skip (missing): ${relativePath}`);
-    return null;
-  }
-  const st = fs.statSync(absPath);
-  const cacheKey = `${absPath}:${st.size}:${st.mtimeMs}`;
-  const existing = anthropicDocBlockCache.get(cacheKey);
-  if (existing) return existing;
-  const pending = (async () => {
-    const mimeType = MIME_BY_EXT[ext] || "application/octet-stream";
-    if (ext === ".pdf") {
-      const data = fs.readFileSync(absPath).toString("base64");
-      return {
-        type: "document",
-        source: { type: "base64", media_type: mimeType, data },
-      };
-    }
-    const text = fs.readFileSync(absPath, "utf8");
-    const name = path.basename(absPath);
-    return { type: "text", text: `[Reference document: ${name}]\n${text.slice(0, 120_000)}` };
-  })().catch((e) => {
-    anthropicDocBlockCache.delete(cacheKey);
-    throw e;
-  });
-  anthropicDocBlockCache.set(cacheKey, pending);
-  return pending;
+function normalizePriorCouncilResponses(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r) => ({
+      gemId: Number(r?.gemId),
+      name: String(r?.name || "").trim() || "Advisor",
+      jobTitle: String(r?.jobTitle || "").trim(),
+      response: String(r?.response || "").trim(),
+    }))
+    .filter((r) => Number.isFinite(r.gemId) && r.response);
 }
 
-async function anthropicCompleteCouncilTurn(client, { instructions, userContentBlocks, gradeLevel }) {
-  const globalBlock = buildOpenAiChatGlobalEducationGuidance(gradeLevel ?? "6-8");
-  const mergedInstructions = [globalBlock, instructions].filter(Boolean).join("\n\n");
-  const response = await client.messages.create({
-    model: ANTHROPIC_CHAT_MODEL,
-    max_tokens: 4096,
-    system: mergedInstructions || undefined,
-    messages: [{ role: "user", content: userContentBlocks }],
-  });
-  const text = extractAnthropicResponseText(response);
-  if (!text.trim()) throw new Error("Claude returned no text.");
-  return text;
+/** Injected before the student question when advisors answer one after another in a round. */
+function buildCouncilSequentialPriorResponsesBlock(priorResponses, currentGemId) {
+  const prior = (priorResponses || []).filter(
+    (p) => Number(p.gemId) !== Number(currentGemId) && p.response
+  );
+  if (!prior.length) return "";
+  const sections = prior.map(
+    (p, i) =>
+      `--- Advisor ${i + 1}: ${p.name}${p.jobTitle ? ` (${p.jobTitle})` : ""} ---\n${p.response}`
+  );
+  return `[Council round — prior advisors in this conversation]
+These council members already answered the student's **same original question** in this round. Read their answers before you write yours.
+
+Your task:
+- Lead with your **own answer to the original student question** from your specialty—not a recap of others.
+- Then add **one short passage** where you **agree with**, **question**, or **offer a different angle on** something a prior advisor said (name them if useful).
+- Use a **different opening**, examples, and structure than anyone below. Do not copy their metaphors, lists, or "first step" advice.
+
+${sections.join("\n\n")}
+
+[Student's original question]`;
+}
+
+function buildCouncilDynamicUserText({
+  coreUserPrompt,
+  followInstr,
+  priorResponses,
+  currentGemId,
+  useSequentialPrior,
+}) {
+  let text = coreUserPrompt;
+  if (useSequentialPrior && priorResponses?.length) {
+    text = `${buildCouncilSequentialPriorResponsesBlock(priorResponses, currentGemId)}\n${text}`;
+  }
+  return text + followInstr;
+}
+
+function priorResponsesForCouncilTurn({ skipSequentialPrior, bodyPrior, accumulatedPrior, singleMemberRequest }) {
+  if (skipSequentialPrior) return [];
+  if (singleMemberRequest && bodyPrior.length) return bodyPrior;
+  return accumulatedPrior;
 }
 
 const JOB_TITLES = {
@@ -1007,6 +1007,7 @@ app.get("/api/creator/health", (req, res) => {
     hasGeminiKey: Boolean(GEMINI_API_KEY && String(GEMINI_API_KEY).trim()),
     hasAnthropicKey: Boolean(ANTHROPIC_API_KEY && String(ANTHROPIC_API_KEY).trim()),
     anthropicChatModel: ANTHROPIC_CHAT_MODEL,
+    anthropicPromptCache: ANTHROPIC_PROMPT_CACHE_ENABLED,
     creatorModelChain: GEMINI_CREATOR_MODEL_CHAIN,
     chatModelChain: GEMINI_CHAT_MODEL_CHAIN,
     vercel: Boolean(process.env.VERCEL),
@@ -2151,7 +2152,7 @@ app.post("/api/creator/local-expert", async (req, res) => {
     gradeLevel: gradeLevelRaw,
   } = req.body || {};
   const gradeLevelNorm = normalizeCouncilGradeLevel(gradeLevelRaw);
-  const useK8CommunityRoster = gradeLevelNorm === "3-5" || gradeLevelNorm === "6-8";
+  const useK8CommunityRoster = gradeLevelNorm === "6-8";
 
   const excludeList = Array.isArray(excludeExperts)
     ? excludeExperts
@@ -2323,12 +2324,12 @@ Extract:
    - For PBL Works–style or similar briefs: treat questions, prompts, or bullets under sections such as **Build Knowledge**, **Develop & Critique**, **Need to Know**, **Sustained Inquiry**, or **Challenging Problem** as source material—rewrite each into one concise objective
    - Otherwise infer objectives from stated outcomes elsewhere in the document
 
-4) **gradeLevel**: If the brief clearly states **student grade band / level / audience**, return exactly one of: **"3-5"** (elementary primary/intermediate, ~grades 3–5), **"6-8"** (middle grades), **"HS"** (high school), **"Uni+"** (college/university/adult/professional learners). Map synonyms (e.g. "middle school"→"6-8", "freshmen"/"9th"→"HS", "undergraduate"→"Uni+"). Use JSON **null** if unclear or not stated.
+4) **gradeLevel**: If the brief clearly states **student grade band / level / audience**, return exactly one of: **"6-8"** (middle grades), **"HS"** (high school), **"Uni+"** (college/university/adult/professional learners). Map synonyms (e.g. "middle school"→"6-8", "elementary" or "grades 3–5"→"6-8", "freshmen"/"9th"→"HS", "undergraduate"→"Uni+"). Use JSON **null** if unclear or not stated.
 
 Strings must not contain raw newlines; use spaces. Escape double quotes inside strings.
 
 Reply with ONLY valid JSON:
-{"title":"string or null","essentialQuestion":"string or null","objectives":["..."],"gradeLevel":"3-5"|"6-8"|"HS"|"Uni+"|null}`;
+{"title":"string or null","essentialQuestion":"string or null","objectives":["..."],"gradeLevel":"6-8"|"HS"|"Uni+"|null}`;
 
   try {
     const filePart = createPartFromBase64(payloadData, payloadMime);
@@ -2364,12 +2365,13 @@ Reply with ONLY valid JSON:
       essentialQuestion = essentialQuestion.slice(0, 497) + "…";
     }
 
-    const allowedGrade = new Set(["3-5", "6-8", "HS", "Uni+"]);
+    const allowedGrade = new Set(["6-8", "HS", "Uni+"]);
     let gradeLevel = null;
     const glRaw = parsed.gradeLevel;
     if (glRaw != null && glRaw !== "") {
       const gs = String(glRaw).trim();
       if (allowedGrade.has(gs)) gradeLevel = gs;
+      else if (gs === "3-5") gradeLevel = "6-8";
     }
 
     res.json({ title, essentialQuestion, objectives, gradeLevel });
@@ -2619,6 +2621,7 @@ app.post("/api/chat/custom", async (req, res) => {
     attachments: rawAttachments,
     followUpPreviousResponse,
     opinionOnResponse,
+    priorCouncilResponses: priorCouncilResponsesRaw,
   } = req.body || {};
 
   const members = Array.isArray(councilProject?.members) ? councilProject.members : [];
@@ -2667,10 +2670,18 @@ app.post("/api/chat/custom", async (req, res) => {
   }
 
   const selectedSet = new Set(selectedGems.map((id) => Number(id)));
-  const toRun = members.filter((m) => m && selectedSet.has(Number(m.id)) && !m.isHuman);
-  const humanSelected = members.filter((m) => m && selectedSet.has(Number(m.id)) && m.isHuman);
+  const orderedSelected = members
+    .filter((m) => m && selectedSet.has(Number(m.id)))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const toRun = orderedSelected.filter((m) => !m.isHuman);
+  const humanSelected = orderedSelected.filter((m) => m.isHuman);
 
   const results = [];
+  const skipSequentialPrior = isFollowUp || !!opinionOnResponse;
+  const bodyPrior = normalizePriorCouncilResponses(priorCouncilResponsesRaw);
+  const singleMemberRequest = selectedGems.length === 1;
+  const accumulatedPrior = [];
+  const useSequentialPrior = !skipSequentialPrior && (toRun.length > 1 || bodyPrior.length > 0);
 
   const orderedAiPeers = orderCouncilPeersForLanes(toRun);
 
@@ -2696,51 +2707,67 @@ app.post("/api/chat/custom", async (req, res) => {
     });
   }
 
-  await Promise.all(
-    toRun.map(async (gem) => {
-      try {
-        const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
-        const userContentBlocks = [
-          ...attachmentContentBlocks,
-          { type: "text", text: projectContext + "\n" + coreUserPrompt + followInstr },
-        ];
-        const peerBlock = buildOpenAiPeerDifferentiationBlock(
-          toRun,
-          gem.id,
-          (g) => (typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"),
-          gradeLevelNorm
-        );
-        const jt = typeof gem.jobTitle === "string" && gem.jobTitle.trim() ? gem.jobTitle.trim() : "Advisor";
-        const lexTail = customCouncilLexileTailInstruction(gradeLevelNorm);
-        const instructions =
-          (gem.systemInstruction || "") +
-          peerBlock +
-          `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
-        const text = await anthropicCompleteCouncilTurn(anthropic, {
-          instructions,
-          userContentBlocks,
-          gradeLevel: gradeLevelNorm,
-        });
-        results.push({
+  for (const gem of toRun) {
+    try {
+      const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
+      const peerBlock = buildOpenAiPeerDifferentiationBlock(
+        toRun,
+        gem.id,
+        (g) => (typeof g.jobTitle === "string" && g.jobTitle.trim() ? g.jobTitle.trim() : "Advisor"),
+        gradeLevelNorm
+      );
+      const jt = typeof gem.jobTitle === "string" && gem.jobTitle.trim() ? gem.jobTitle.trim() : "Advisor";
+      const lexTail = customCouncilLexileTailInstruction(gradeLevelNorm);
+      const roleInstructions =
+        (gem.systemInstruction || "") +
+        peerBlock +
+        `\n\n${projectContext}\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). When mentioning websites, always provide the full URL (https://...).`;
+      const priorForTurn = priorResponsesForCouncilTurn({
+        skipSequentialPrior,
+        bodyPrior,
+        accumulatedPrior,
+        singleMemberRequest,
+      });
+      const dynamicUserText = buildCouncilDynamicUserText({
+        coreUserPrompt,
+        followInstr,
+        priorResponses: priorForTurn,
+        currentGemId: gem.id,
+        useSequentialPrior,
+      });
+      const text = await anthropicCompleteCouncilTurn(anthropic, {
+        roleInstructions,
+        volatileUserBlocks: attachmentContentBlocks,
+        dynamicUserText,
+        gradeLevel: gradeLevelNorm,
+      });
+      results.push({
+        gemId: gem.id,
+        name: gem.name,
+        jobTitle: gem.jobTitle || "",
+        response: text,
+        error: null,
+        isHuman: false,
+      });
+      if (useSequentialPrior && text) {
+        accumulatedPrior.push({
           gemId: gem.id,
           name: gem.name,
           jobTitle: gem.jobTitle || "",
           response: text,
-          error: null,
-          isHuman: false,
-        });
-      } catch (err) {
-        results.push({
-          gemId: gem.id,
-          name: gem.name,
-          jobTitle: gem.jobTitle || "",
-          response: null,
-          error: err?.message || String(err),
-          isHuman: false,
         });
       }
-    })
-  );
+    } catch (err) {
+      results.push({
+        gemId: gem.id,
+        name: gem.name,
+        jobTitle: gem.jobTitle || "",
+        response: null,
+        error: err?.message || String(err),
+        isHuman: false,
+      });
+    }
+  }
 
   results.sort((a, b) => Number(a.gemId) - Number(b.gemId));
   res.json({ results });
@@ -2752,7 +2779,7 @@ app.post("/api/chat", async (req, res) => {
     return res.status(503).json({ error: "Server missing ANTHROPIC_API_KEY. Add it to .env and restart." });
   }
 
-  const { selectedGems = [], prompt, attachments: rawAttachments, followUpPreviousResponse, opinionOnResponse } = req.body;
+  const { selectedGems = [], prompt, attachments: rawAttachments, followUpPreviousResponse, opinionOnResponse, priorCouncilResponses: priorCouncilResponsesRaw } = req.body;
   if (!Array.isArray(selectedGems) || selectedGems.length === 0) {
     return res.status(400).json({ error: "Select at least one Gem." });
   }
@@ -2781,20 +2808,12 @@ app.post("/api/chat", async (req, res) => {
 
   const results = [];
   const selectedSet = new Set((selectedGems || []).map((id) => Number(id)));
-  const gemConfigs = GEMS.filter((g) => selectedSet.has(Number(g.id)));
-
-  const allDocPaths = new Set(gemConfigs.flatMap((g) => (Array.isArray(g.documents) ? g.documents : [])));
-  const councilDocBlocks = new Map();
-  await Promise.all(
-    [...allDocPaths].map(async (rel) => {
-      try {
-        const block = await anthropicCouncilDocContentBlock(rel);
-        if (block) councilDocBlocks.set(rel, block);
-      } catch (e) {
-        console.warn(`Claude council doc skipped: ${rel}`, e.message);
-      }
-    })
-  );
+  const gemConfigs = GEMS.filter((g) => selectedSet.has(Number(g.id))).sort((a, b) => Number(a.id) - Number(b.id));
+  const skipSequentialPrior = isFollowUp || !!opinionOnResponse;
+  const bodyPrior = normalizePriorCouncilResponses(priorCouncilResponsesRaw);
+  const singleMemberRequest = selectedGems.length === 1;
+  const accumulatedPrior = [];
+  const useSequentialPrior = !skipSequentialPrior && (gemConfigs.length > 1 || bodyPrior.length > 0);
 
   const attachmentContentBlocks = [];
   if (hasAttachments) {
@@ -2806,43 +2825,54 @@ app.post("/api/chat", async (req, res) => {
 
   const orderedAiPeers = orderCouncilPeersForLanes(gemConfigs);
 
-  await Promise.all(
-    gemConfigs.map(async (gem) => {
-      try {
-        const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
-        const userContentBlocks = [];
-        const docPaths = Array.isArray(gem.documents) ? gem.documents : [];
-        for (const rel of docPaths) {
-          const block = councilDocBlocks.get(rel);
-          if (block) userContentBlocks.push(block);
-        }
-        for (const p of attachmentContentBlocks) userContentBlocks.push(p);
-        userContentBlocks.push({ type: "text", text: coreUserPrompt + followInstr });
+  for (const gem of gemConfigs) {
+    try {
+      const followInstr = buildFollowUpCommunityInstruction(locationStr, orderedAiPeers, gem);
+      const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name, "6-8");
+      const jt = JOB_TITLES[gem.name] || gem.name;
+      const lexTail = customCouncilLexileTailInstruction("6-8");
+      const roleInstructions =
+        (gem.systemInstruction || "") +
+        peerBlock +
+        `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
+      const priorForTurn = priorResponsesForCouncilTurn({
+        skipSequentialPrior,
+        bodyPrior,
+        accumulatedPrior,
+        singleMemberRequest,
+      });
+      const dynamicUserText = buildCouncilDynamicUserText({
+        coreUserPrompt,
+        followInstr,
+        priorResponses: priorForTurn,
+        currentGemId: gem.id,
+        useSequentialPrior,
+      });
 
-        const peerBlock = buildOpenAiPeerDifferentiationBlock(gemConfigs, gem.id, (g) => JOB_TITLES[g.name] || g.name, "6-8");
-        const jt = JOB_TITLES[gem.name] || gem.name;
-        const lexTail = customCouncilLexileTailInstruction("6-8");
-        const instructions =
-          (gem.systemInstruction || "") +
-          peerBlock +
-          `\n\nExpertise focus: Let **${jt}** shape what you emphasize—methods, cautions, and examples that role would notice before generic study tips.\n\n${lexTail} Each response must not exceed ${wordLimit} words total (excluding the "Follow up in your community" section). Do not include parenthetical references to the Assessment criteria (e.g. Collaboration, Technical Design, Research, Argumentation) in your response. When mentioning websites, always provide the full URL (https://...) so they can be hyperlinked.`;
-
-        const text = await anthropicCompleteCouncilTurn(anthropic, {
-          instructions,
-          userContentBlocks,
-          gradeLevel: "6-8",
-        });
-        results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
-      } catch (err) {
-        results.push({
+      const text = await anthropicCompleteCouncilTurn(anthropic, {
+        roleInstructions,
+        volatileUserBlocks: attachmentContentBlocks,
+        dynamicUserText,
+        gradeLevel: "6-8",
+      });
+      results.push({ gemId: gem.id, name: gem.name, response: text, error: null });
+      if (useSequentialPrior && text) {
+        accumulatedPrior.push({
           gemId: gem.id,
           name: gem.name,
-          response: null,
-          error: err?.message || String(err),
+          jobTitle: JOB_TITLES[gem.name] || gem.name,
+          response: text,
         });
       }
-    })
-  );
+    } catch (err) {
+      results.push({
+        gemId: gem.id,
+        name: gem.name,
+        response: null,
+        error: err?.message || String(err),
+      });
+    }
+  }
 
   results.sort((a, b) => a.gemId - b.gemId);
   res.json({ results });

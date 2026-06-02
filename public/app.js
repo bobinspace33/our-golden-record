@@ -18,10 +18,13 @@ const councilLoading = document.getElementById("councilLoading");
 const councilLoadingMessage = document.getElementById("councilLoadingMessage");
 const fileInput = document.getElementById("fileInput");
 const uploadBtn = document.getElementById("uploadBtn");
+const phaseProjectTitle = document.getElementById("phaseProjectTitle");
 const phaseMilestoneTitle = document.getElementById("phaseMilestoneTitle");
 const phaseMilestoneBannerText = document.getElementById("phaseMilestoneBannerText");
 const viewRubricCouncilBtn = document.getElementById("viewRubricCouncilBtn");
 const attachmentsList = document.getElementById("attachmentsList");
+const promptSessionRow = document.getElementById("promptSessionRow");
+const promptSessionChecks = document.getElementById("promptSessionChecks");
 const responsesOverlay = document.getElementById("responsesOverlay");
 const responsesOverlayBackdrop = document.getElementById("responsesOverlayBackdrop");
 const responsesOverlayClose = document.getElementById("responsesOverlayClose");
@@ -51,7 +54,7 @@ const FOLLOW_UP_MAX_CHARS = 144;
 
 const COUNCIL_LOADING_PHRASES = [
   "Council members are thinking…",
-  "Consulting the documents…",
+  "Listening carefully…",
   "Organizing their thoughts…",
   "Discussing your question…",
   "Preparing their responses…",
@@ -152,6 +155,10 @@ let attachments = []; // { name, mimeType, data (base64) }
 
 const APP_KIND = document.body.dataset.app || "golden-record";
 
+const DAILY_PROMPT_LIMIT = 3;
+const PROMPT_INPUT_DEFAULT_PLACEHOLDER = "Ask something… all selected members will answer.";
+const PROMPT_EXHAUSTED_PLACEHOLDER = "All daily prompts have been used - come back tomorrow!";
+
 /** Set to `true` after QC — enables View/Create Rubric on the council page (must match create-council.js). */
 const RUBRIC_CREATION_ENABLED = false;
 let customCouncilProject = null;
@@ -228,7 +235,7 @@ function setReplaceHumanSearchLoading(loading, isAnotherSearch) {
   const panel = document.querySelector(".replace-human-editor-panel");
   if (msgEl) {
     const g = getCouncilGradeLevelForUi();
-    const k8 = g === "3-5" || g === "6-8";
+    const k8 = g === "6-8";
     msgEl.textContent = k8
       ? isAnotherSearch
         ? "Finding another community member…"
@@ -239,7 +246,7 @@ function setReplaceHumanSearchLoading(loading, isAnotherSearch) {
   }
   if (subEl) {
     const g = getCouncilGradeLevelForUi();
-    const k8 = g === "3-5" || g === "6-8";
+    const k8 = g === "6-8";
     subEl.textContent = k8
       ? "Matching your project theme to school-community profiles (demo roster). This can take a little while—please wait."
       : "Using your project, location, and this seat’s role. This can take a little while—please wait.";
@@ -392,6 +399,87 @@ function getCouncilGradeLevelForUi() {
     return String(customCouncilProject.gradeLevel).trim();
   }
   return "6-8";
+}
+
+function usesDailyPromptLimit() {
+  const g = getCouncilGradeLevelForUi();
+  return g === "6-8" || g === "HS";
+}
+
+function dailyPromptStorageKey() {
+  const today = new Date().toISOString().slice(0, 10);
+  const scope =
+    APP_KIND === "custom" && customCouncilProject?.id != null
+      ? `custom-${customCouncilProject.id}`
+      : "golden-record";
+  return `konsult-daily-prompts-${today}-${scope}`;
+}
+
+function getDailyPromptsUsed() {
+  if (!usesDailyPromptLimit()) return 0;
+  try {
+    const n = parseInt(localStorage.getItem(dailyPromptStorageKey()) || "0", 10);
+    return Number.isFinite(n) ? Math.min(DAILY_PROMPT_LIMIT, Math.max(0, n)) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function incrementDailyPromptsUsed() {
+  if (!usesDailyPromptLimit()) return;
+  try {
+    localStorage.setItem(dailyPromptStorageKey(), String(getDailyPromptsUsed() + 1));
+  } catch {
+    /* ignore */
+  }
+  applyDailyPromptLimitUi();
+}
+
+function decrementDailyPromptsUsed() {
+  if (!usesDailyPromptLimit()) return;
+  try {
+    localStorage.setItem(dailyPromptStorageKey(), String(Math.max(0, getDailyPromptsUsed() - 1)));
+  } catch {
+    /* ignore */
+  }
+  applyDailyPromptLimitUi();
+}
+
+function dailyPromptsExhausted() {
+  return usesDailyPromptLimit() && getDailyPromptsUsed() >= DAILY_PROMPT_LIMIT;
+}
+
+function updatePromptSessionChecks() {
+  if (!promptSessionChecks) return;
+  const used = getDailyPromptsUsed();
+  promptSessionChecks.querySelectorAll(".prompt-session-check").forEach((el, idx) => {
+    el.classList.toggle("prompt-session-check--used", idx < used);
+  });
+}
+
+function applyDailyPromptLimitUi() {
+  if (!usesDailyPromptLimit()) {
+    if (promptSessionRow) promptSessionRow.hidden = true;
+    if (promptInput) {
+      promptInput.disabled = false;
+      if (!promptInput.placeholder || promptInput.placeholder === PROMPT_EXHAUSTED_PLACEHOLDER) {
+        promptInput.placeholder = PROMPT_INPUT_DEFAULT_PLACEHOLDER;
+      }
+    }
+    if (uploadBtn) uploadBtn.disabled = false;
+    return;
+  }
+
+  if (promptSessionRow) promptSessionRow.hidden = false;
+  updatePromptSessionChecks();
+
+  const exhausted = dailyPromptsExhausted();
+  if (promptInput) {
+    promptInput.disabled = exhausted;
+    promptInput.placeholder = exhausted ? PROMPT_EXHAUSTED_PLACEHOLDER : PROMPT_INPUT_DEFAULT_PLACEHOLDER;
+  }
+  if (uploadBtn) uploadBtn.disabled = exhausted;
+  setSubmitState();
 }
 
 /** Typing animation for overlay text (faster pacing for Uni+). */
@@ -845,24 +933,28 @@ const PHASE_MILESTONE_LABELS = {
 };
 
 function syncPhaseMilestoneTitle() {
-  if (!phaseMilestoneTitle && !phaseMilestoneBannerText) return;
   const phase = getProjectPhase();
-  let text = "";
+  let phaseTitle = "";
+  let milestoneText = "";
+
   if (APP_KIND === "custom" && customCouncilProject && Array.isArray(customCouncilProject.phases)) {
     const idx = Number(phase) - 1;
     const p = customCouncilProject.phases[idx];
     if (p) {
-      const desc = String(p.description || "").trim();
-      const tit = String(p.title || "").trim();
-      text = desc || tit || "—";
+      phaseTitle = String(p.title || "").trim() || `Phase ${phase}`;
+      milestoneText = String(p.description || "").trim() || "—";
     } else {
-      text = "—";
+      phaseTitle = `Phase ${phase}`;
+      milestoneText = "—";
     }
   } else {
-    text = PHASE_MILESTONE_LABELS[phase] || PHASE_MILESTONE_LABELS[1];
+    phaseTitle = PHASE_MILESTONE_LABELS[phase] || PHASE_MILESTONE_LABELS[1];
+    milestoneText = phaseTitle;
   }
-  if (phaseMilestoneTitle) phaseMilestoneTitle.textContent = text;
-  if (phaseMilestoneBannerText) phaseMilestoneBannerText.textContent = text;
+
+  if (phaseProjectTitle) phaseProjectTitle.textContent = phaseTitle;
+  if (phaseMilestoneTitle) phaseMilestoneTitle.textContent = phaseTitle;
+  if (phaseMilestoneBannerText) phaseMilestoneBannerText.textContent = milestoneText;
 }
 
 function syncCouncilEssentialQuestionTagline() {
@@ -887,7 +979,8 @@ function setSubmitState() {
   const hasSelection = selectedIds.size > 0;
   const hasPrompt = promptInput.value.trim().length > 0;
   const hasAttachments = attachments.length > 0;
-  submitBtn.disabled = !hasSelection || (!hasPrompt && !hasAttachments);
+  const limitBlocked = dailyPromptsExhausted();
+  submitBtn.disabled = limitBlocked || !hasSelection || (!hasPrompt && !hasAttachments);
   selectionHint.textContent = hasSelection
     ? `${selectedIds.size} member${selectedIds.size === 1 ? "" : "s"} selected`
     : "Select at least one member";
@@ -1269,7 +1362,7 @@ function applyReplaceHumanEditorSave() {
   mm.image = image;
   const gradeLevel = getCouncilGradeLevelForUi();
   mm.systemInstruction =
-    gradeLevel === "3-5" || gradeLevel === "6-8"
+    gradeLevel === "6-8"
       ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION
       : HUMAN_ADVISOR_SYSTEM_INSTRUCTION;
   mm.humanContact = {
@@ -1481,47 +1574,85 @@ function getWordDelayMs() {
 }
 
 function animateResponseText(container, text, animation = {}) {
-  if (!container) return;
+  if (!container) return Promise.resolve();
   const letterDelay = animation.letterDelayMs ?? LETTER_DELAY_MS;
   const sentencePause = animation.sentenceEndPauseMs ?? SENTENCE_END_PAUSE_MS;
   const lineBreakPause = animation.lineBreakPauseMs ?? LINE_BREAK_PAUSE_MS;
   container.innerHTML = "";
   const tokens = tokenizeForAnimation(text);
-  let i = 0;
-  let bulletNext = false;
-  let needSpace = false;
-  let previousWordEndedWithQuestion = false;
-  let lastWasFollowUpHeader = false;
-  let lastAppendedToken = null;
+  if (!tokens.length) return Promise.resolve();
 
-  function scrollToBottom() {
-    const scrollParent = container.closest(".response-overlay-card-body");
-    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
-  }
+  return new Promise((resolve) => {
+    let i = 0;
+    let bulletNext = false;
+    let needSpace = false;
+    let previousWordEndedWithQuestion = false;
+    let lastWasFollowUpHeader = false;
+    let lastAppendedToken = null;
 
-  function scheduleNext() {
-    if (i >= tokens.length) return;
-    const delay = getWordDelayMs();
-    setTimeout(appendNext, delay);
-  }
+    function scrollToBottom() {
+      const scrollParent = container.closest(".response-overlay-card-body");
+      if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
+    }
 
-  function appendNext() {
-    if (i >= tokens.length) return;
-    const t = tokens[i];
-    i++;
-    lastAppendedToken = t;
+    function afterToken(delayMs) {
+      if (i >= tokens.length) {
+        resolve();
+        return;
+      }
+      if (delayMs != null) setTimeout(scheduleNext, delayMs);
+      else scheduleNext();
+    }
 
-    if (t.type === "header") {
-      needSpace = false;
-      bulletNext = false;
-      previousWordEndedWithQuestion = false;
-      const headerText = (t.text || "").trim();
-      const rich =
-        typeof markdownInlineToHtml === "function" &&
-        /\*\*|\*(?!\*)/.test(headerText);
-      if (rich) {
-        const pr = document.createElement("p");
-        pr.className =
+    function scheduleNext() {
+      if (i >= tokens.length) {
+        resolve();
+        return;
+      }
+      setTimeout(appendNext, getWordDelayMs());
+    }
+
+    function appendNext() {
+      if (i >= tokens.length) {
+        resolve();
+        return;
+      }
+      const t = tokens[i];
+      i++;
+      lastAppendedToken = t;
+
+      if (t.type === "header") {
+        needSpace = false;
+        bulletNext = false;
+        previousWordEndedWithQuestion = false;
+        const headerText = (t.text || "").trim();
+        const rich =
+          typeof markdownInlineToHtml === "function" &&
+          /\*\*|\*(?!\*)/.test(headerText);
+        if (rich) {
+          const pr = document.createElement("p");
+          pr.className =
+            "response-overlay-section-header" +
+            (t.mdHeading ? " response-overlay-md-heading" : "") +
+            (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
+          if (/[?]$/.test(headerText)) {
+            const bullet = document.createElement("span");
+            bullet.className = "response-overlay-bullet";
+            bullet.textContent = "• ";
+            pr.appendChild(bullet);
+          }
+          const inner = document.createElement("span");
+          inner.innerHTML = markdownInlineToHtml(headerText);
+          pr.appendChild(inner);
+          container.appendChild(pr);
+          container.appendChild(document.createElement("br"));
+          lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
+          scrollToBottom();
+          afterToken(sentencePause);
+          return;
+        }
+        const p = document.createElement("p");
+        p.className =
           "response-overlay-section-header" +
           (t.mdHeading ? " response-overlay-md-heading" : "") +
           (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
@@ -1529,136 +1660,117 @@ function animateResponseText(container, text, animation = {}) {
           const bullet = document.createElement("span");
           bullet.className = "response-overlay-bullet";
           bullet.textContent = "• ";
-          pr.appendChild(bullet);
+          p.appendChild(bullet);
         }
-        const inner = document.createElement("span");
-        inner.innerHTML = markdownInlineToHtml(headerText);
-        pr.appendChild(inner);
-        container.appendChild(pr);
+        const textNode = document.createTextNode("");
+        p.appendChild(textNode);
+        container.appendChild(p);
         container.appendChild(document.createElement("br"));
         lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
-        scrollToBottom();
-        if (i < tokens.length) setTimeout(scheduleNext, sentencePause);
-        return;
-      }
-      const p = document.createElement("p");
-      p.className =
-        "response-overlay-section-header" +
-        (t.mdHeading ? " response-overlay-md-heading" : "") +
-        (isFollowUpCommunityHeader(t.text) ? " response-overlay-followup-community" : "");
-      if (/[?]$/.test(headerText)) {
-        const bullet = document.createElement("span");
-        bullet.className = "response-overlay-bullet";
-        bullet.textContent = "• ";
-        p.appendChild(bullet);
-      }
-      const textNode = document.createTextNode("");
-      p.appendChild(textNode);
-      container.appendChild(p);
-      container.appendChild(document.createElement("br"));
-      lastWasFollowUpHeader = isFollowUpCommunityHeader(t.text);
-      let hIdx = 0;
-      function headerTick() {
-        if (hIdx >= headerText.length) {
+        let hIdx = 0;
+        function headerTick() {
+          if (hIdx >= headerText.length) {
+            scrollToBottom();
+            afterToken(sentencePause);
+            return;
+          }
+          textNode.textContent += headerText[hIdx++];
           scrollToBottom();
-          if (i < tokens.length) setTimeout(scheduleNext, sentencePause);
-          return;
+          setTimeout(headerTick, letterDelay);
         }
-        textNode.textContent += headerText[hIdx++];
-        scrollToBottom();
-        setTimeout(headerTick, letterDelay);
-      }
-      headerTick();
-      return;
-    }
-    if (t.type === "linebreak") {
-      needSpace = false;
-      container.appendChild(document.createElement("br"));
-      if (lastWasFollowUpHeader) {
-        lastWasFollowUpHeader = false;
-      } else if (!previousWordEndedWithQuestion) {
-        appendParagraphSpacer(container);
-      }
-      previousWordEndedWithQuestion = false;
-      scrollToBottom();
-      if (i < tokens.length) setTimeout(scheduleNext, lineBreakPause);
-      return;
-    }
-    if (t.type === "word") {
-      if (bulletNext) {
-        bulletNext = false;
-        appendBulletGroupSpacer(container);
-        container.appendChild(document.createElement("br"));
-        const bullet = document.createElement("span");
-        bullet.className = "response-overlay-bullet";
-        bullet.textContent = "• ";
-        container.appendChild(bullet);
-      }
-      if (needSpace) container.appendChild(document.createTextNode(" "));
-      const urlParts = parseUrlWord(t.text);
-      if (urlParts) {
-        const a = document.createElement("a");
-        a.className = "response-word-appear response-overlay-link";
-        a.href = urlParts.href;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.textContent = urlParts.href;
-        container.appendChild(a);
-        if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
-        needSpace = true;
-        if (/[?]$/.test(t.text)) bulletNext = true;
-        previousWordEndedWithQuestion = /[?]$/.test(t.text);
-        scrollToBottom();
-        if (i < tokens.length) setTimeout(scheduleNext, 25);
+        headerTick();
         return;
       }
-      const segments = extractUrlSegments(t.text);
-      let segIdx = 0;
-      function onSegmentDone() {
-        if (segIdx >= segments.length) {
+      if (t.type === "linebreak") {
+        needSpace = false;
+        container.appendChild(document.createElement("br"));
+        if (lastWasFollowUpHeader) {
+          lastWasFollowUpHeader = false;
+        } else if (!previousWordEndedWithQuestion) {
+          appendParagraphSpacer(container);
+        }
+        previousWordEndedWithQuestion = false;
+        scrollToBottom();
+        afterToken(lineBreakPause);
+        return;
+      }
+      if (t.type === "word") {
+        if (bulletNext) {
+          bulletNext = false;
+          appendBulletGroupSpacer(container);
+          container.appendChild(document.createElement("br"));
+          const bullet = document.createElement("span");
+          bullet.className = "response-overlay-bullet";
+          bullet.textContent = "• ";
+          container.appendChild(bullet);
+        }
+        if (needSpace) container.appendChild(document.createTextNode(" "));
+        const urlParts = parseUrlWord(t.text);
+        if (urlParts) {
+          const a = document.createElement("a");
+          a.className = "response-word-appear response-overlay-link";
+          a.href = urlParts.href;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = urlParts.href;
+          container.appendChild(a);
+          if (urlParts.suffix) container.appendChild(document.createTextNode(urlParts.suffix));
           needSpace = true;
           if (/[?]$/.test(t.text)) bulletNext = true;
           previousWordEndedWithQuestion = /[?]$/.test(t.text);
           scrollToBottom();
-          if (i < tokens.length) scheduleNext();
+          afterToken(25);
           return;
         }
-        const seg = segments[segIdx++];
-        if (seg.type === "url") {
-          const a = document.createElement("a");
-          a.className = "response-word-appear response-overlay-link";
-          a.href = seg.value;
-          a.target = "_blank";
-          a.rel = "noopener noreferrer";
-          a.textContent = seg.value;
-          container.appendChild(a);
-          scrollToBottom();
-          setTimeout(onSegmentDone, 25);
-          return;
-        }
-        const span = document.createElement("span");
-        span.className = "response-word-appear" + (t.bold ? " response-word-bold" : "") + (t.italic ? " response-word-italic" : "");
-        container.appendChild(span);
-        let charIdx = 0;
-        function tick() {
-          if (charIdx >= seg.value.length) {
-            onSegmentDone();
+        const segments = extractUrlSegments(t.text);
+        let segIdx = 0;
+        function onSegmentDone() {
+          if (segIdx >= segments.length) {
+            needSpace = true;
+            if (/[?]$/.test(t.text)) bulletNext = true;
+            previousWordEndedWithQuestion = /[?]$/.test(t.text);
+            scrollToBottom();
+            afterToken();
             return;
           }
-          const ch = seg.value[charIdx++];
-          span.textContent += ch;
-          scrollToBottom();
-          const delay = /[.!?]/.test(ch) ? sentencePause : letterDelay;
-          setTimeout(tick, delay);
+          const seg = segments[segIdx++];
+          if (seg.type === "url") {
+            const a = document.createElement("a");
+            a.className = "response-word-appear response-overlay-link";
+            a.href = seg.value;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.textContent = seg.value;
+            container.appendChild(a);
+            scrollToBottom();
+            setTimeout(onSegmentDone, 25);
+            return;
+          }
+          const span = document.createElement("span");
+          span.className = "response-word-appear" + (t.bold ? " response-word-bold" : "") + (t.italic ? " response-word-italic" : "");
+          container.appendChild(span);
+          let charIdx = 0;
+          function tick() {
+            if (charIdx >= seg.value.length) {
+              onSegmentDone();
+              return;
+            }
+            const ch = seg.value[charIdx++];
+            span.textContent += ch;
+            scrollToBottom();
+            const delay = /[.!?]/.test(ch) ? sentencePause : letterDelay;
+            setTimeout(tick, delay);
+          }
+          tick();
         }
-        tick();
+        onSegmentDone();
+        return;
       }
-      onSegmentDone();
-      return;
+      afterToken();
     }
-    if (i < tokens.length) scheduleNext();
-  }
-  appendNext();
+
+    appendNext();
+  });
 }
 
 function renderResponseTextStatic(container, text) {
@@ -1765,6 +1877,238 @@ function renderResponseTextStatic(container, text) {
 
 function closeResponsesOverlay() {
   if (responsesOverlay) responsesOverlay.hidden = true;
+  stopAllCouncilCardWaiting();
+}
+
+const COUNCIL_MEMBER_WAITING_PHRASES = [
+  "Listening…",
+  "Considering alternate viewpoints…",
+  "Taking notes…",
+  "Organizing thoughts…",
+  "Weighing the evidence…",
+  "Finding a distinct angle…",
+  "Reflecting on the question…",
+  "Preparing a response…",
+  "Considering what others said…",
+  "Thinking it through…",
+  "Looking for a fresh lens…",
+  "Connecting ideas…",
+];
+
+const councilCardWaitingIntervals = new Map();
+
+function orderCouncilMemberIdsForTurn(ids) {
+  return [...ids].sort((a, b) => Number(a) - Number(b));
+}
+
+function stopCouncilCardWaiting(gemId) {
+  const key = Number(gemId);
+  const timer = councilCardWaitingIntervals.get(key);
+  if (timer) clearInterval(timer);
+  councilCardWaitingIntervals.delete(key);
+}
+
+function stopAllCouncilCardWaiting() {
+  for (const key of [...councilCardWaitingIntervals.keys()]) {
+    stopCouncilCardWaiting(key);
+  }
+}
+
+function getResponseOverlayCard(gemId) {
+  return responsesOverlayGrid?.querySelector(`.response-overlay-card[data-gem-id="${Number(gemId)}"]`);
+}
+
+function setCouncilCardThinking(gemId) {
+  stopCouncilCardWaiting(gemId);
+  const textEl = getResponseOverlayCard(gemId)?.querySelector(".response-overlay-text");
+  if (!textEl) return;
+  textEl.classList.remove("response-overlay-text--waiting");
+  textEl.classList.add("response-overlay-text--thinking");
+  textEl.textContent = "Thinking…";
+}
+
+function startCouncilCardWaiting(gemId) {
+  stopCouncilCardWaiting(gemId);
+  const textEl = getResponseOverlayCard(gemId)?.querySelector(".response-overlay-text");
+  if (!textEl) return;
+  textEl.classList.remove("response-overlay-text--thinking");
+  textEl.classList.add("response-overlay-text--waiting");
+  let i = 0;
+  textEl.textContent = COUNCIL_MEMBER_WAITING_PHRASES[0];
+  const timer = setInterval(() => {
+    i = (i + 1) % COUNCIL_MEMBER_WAITING_PHRASES.length;
+    if (textEl.classList.contains("response-overlay-text--waiting")) {
+      textEl.textContent = COUNCIL_MEMBER_WAITING_PHRASES[i];
+    }
+  }, 2400);
+  councilCardWaitingIntervals.set(Number(gemId), timer);
+}
+
+function appendResponseOverlayCardActions(card, { gemId, name, response, error, showSaveButton, gFound }) {
+  const actionsEl = card.querySelector(".response-overlay-actions");
+  if (!actionsEl || actionsEl.dataset.actionsBound === "1") return;
+  let bound = false;
+  if (showSaveButton) {
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn-save response-overlay-btn";
+    saveBtn.textContent = "Save Response";
+    saveBtn.addEventListener("click", () => {
+      document.querySelectorAll(".response-overlay-save-feedback").forEach((el) => {
+        el.textContent = "";
+        el.hidden = true;
+      });
+      saveCurrentChat();
+    });
+    actionsEl.appendChild(saveBtn);
+    bound = true;
+  }
+  if (!error && response && !gFound?.isHuman) {
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.className = "btn-send-to response-overlay-btn";
+    sendBtn.textContent = "Send Response to…";
+    sendBtn.addEventListener("click", () => openSendToOverlay({ gemId, name, response }));
+    actionsEl.appendChild(sendBtn);
+    const followUpBtn = document.createElement("button");
+    followUpBtn.type = "button";
+    followUpBtn.className = "btn-follow-up response-overlay-btn";
+    followUpBtn.textContent = "Ask follow-up";
+    followUpBtn.addEventListener("click", () => openFollowUpPrompt({ gemId, name, response, card }));
+    actionsEl.appendChild(followUpBtn);
+    const saveFeedback = document.createElement("span");
+    saveFeedback.className = "response-overlay-save-feedback";
+    saveFeedback.hidden = true;
+    saveFeedback.setAttribute("aria-live", "polite");
+    actionsEl.appendChild(saveFeedback);
+    bound = true;
+  }
+  if (bound) actionsEl.dataset.actionsBound = "1";
+}
+
+async function finishCouncilOverlayCard(gemId, result, { jobTitleMap = {}, animate = true, showSaveButton = true }) {
+  stopCouncilCardWaiting(gemId);
+  const card = getResponseOverlayCard(gemId);
+  if (!card) return;
+  const gFound = gems.find((g) => Number(g.id) === Number(gemId));
+  const name = result.name || gFound?.name || "Advisor";
+  const body = card.querySelector(".response-overlay-card-body");
+  let textEl = card.querySelector(".response-overlay-text");
+  const animParams = getResponseAnimationParams();
+
+  if (result.error) {
+    card.querySelector(".response-overlay-error")?.remove();
+    if (textEl) textEl.remove();
+    const errP = document.createElement("p");
+    errP.className = "response-overlay-error";
+    errP.textContent = result.error;
+    body?.appendChild(errP);
+  } else if (body) {
+    card.querySelector(".response-overlay-error")?.remove();
+    if (!textEl) {
+      textEl = document.createElement("div");
+      textEl.className = "response-overlay-text";
+      textEl.setAttribute("role", "article");
+      body.appendChild(textEl);
+    }
+    textEl.classList.remove("response-overlay-text--waiting", "response-overlay-text--thinking");
+    if (animate) await animateResponseText(textEl, result.response || "", animParams);
+    else renderResponseTextStatic(textEl, result.response || "");
+  }
+
+  appendResponseOverlayCardActions(card, {
+    gemId,
+    name,
+    response: result.response,
+    error: result.error,
+    showSaveButton,
+    gFound,
+  });
+}
+
+function initSequentialCouncilOverlay(orderedIds, jobTitleMap) {
+  const shells = orderedIds.map((id) => {
+    const g = gems.find((x) => Number(x.id) === Number(id));
+    return {
+      gemId: id,
+      name: g?.name || "Advisor",
+      jobTitle: g?.jobTitle || jobTitleMap[g?.name] || "",
+      response: null,
+      error: null,
+    };
+  });
+  openResponsesOverlay(shells, { showSaveButton: false, jobTitleMap, animate: false });
+  orderedIds.forEach((id, i) => {
+    if (i === 0) setCouncilCardThinking(id);
+    else startCouncilCardWaiting(id);
+  });
+}
+
+async function fetchCouncilChatTurn({ memberId, bodyBase, priorCouncilResponses }) {
+  const payload = chatPayload({
+    ...bodyBase,
+    selectedGems: [memberId],
+    ...(priorCouncilResponses?.length ? { priorCouncilResponses } : {}),
+  });
+  const res = await fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  const row =
+    (data.results || []).find((r) => Number(r.gemId) === Number(memberId)) || (data.results || [])[0];
+  if (!row) throw new Error("No response from council member.");
+  return row;
+}
+
+async function runSequentialCouncilChat({ orderedIds, bodyBase, jobTitleMap }) {
+  initSequentialCouncilOverlay(orderedIds, jobTitleMap);
+  const priorCouncilResponses = [];
+  const accumulated = [];
+
+  for (let i = 0; i < orderedIds.length; i++) {
+    const memberId = orderedIds[i];
+    setCouncilCardThinking(memberId);
+    for (let j = i + 1; j < orderedIds.length; j++) {
+      startCouncilCardWaiting(orderedIds[j]);
+    }
+
+    let result;
+    try {
+      result = await fetchCouncilChatTurn({
+        memberId,
+        bodyBase,
+        priorCouncilResponses: priorCouncilResponses.length ? priorCouncilResponses : undefined,
+      });
+      const g = gems.find((x) => Number(x.id) === Number(memberId));
+      result.jobTitle = result.jobTitle || g?.jobTitle || jobTitleMap[result.name] || "";
+    } catch (err) {
+      const g = gems.find((x) => Number(x.id) === Number(memberId));
+      result = {
+        gemId: memberId,
+        name: g?.name || "Advisor",
+        jobTitle: g?.jobTitle || jobTitleMap[g?.name] || "",
+        response: null,
+        error: err.message || String(err),
+      };
+    }
+
+    await finishCouncilOverlayCard(memberId, result, { jobTitleMap, animate: true, showSaveButton: true });
+    accumulated.push(result);
+    if (result.response && !result.error) {
+      priorCouncilResponses.push({
+        gemId: memberId,
+        name: result.name,
+        jobTitle: result.jobTitle || "",
+        response: result.response,
+      });
+    }
+  }
+
+  stopAllCouncilCardWaiting();
+  return accumulated;
 }
 
 function updateReturnToResponseButton() {
@@ -1847,39 +2191,7 @@ function openResponsesOverlay(results, options = {}) {
         renderResponseTextStatic(textEl, response);
       }
     }
-    if (showSaveButton) {
-      const saveBtn = document.createElement("button");
-      saveBtn.type = "button";
-      saveBtn.className = "btn-save response-overlay-btn";
-      saveBtn.textContent = "Save Response";
-      saveBtn.addEventListener("click", () => {
-        document.querySelectorAll(".response-overlay-save-feedback").forEach((el) => {
-          el.textContent = "";
-          el.hidden = true;
-        });
-        saveCurrentChat();
-      });
-      actionsEl.appendChild(saveBtn);
-    }
-    if (!error && response && !gFound?.isHuman) {
-      const sendBtn = document.createElement("button");
-      sendBtn.type = "button";
-      sendBtn.className = "btn-send-to response-overlay-btn";
-      sendBtn.textContent = "Send Response to…";
-      sendBtn.addEventListener("click", () => openSendToOverlay({ gemId, name, response }));
-      actionsEl.appendChild(sendBtn);
-      const followUpBtn = document.createElement("button");
-      followUpBtn.type = "button";
-      followUpBtn.className = "btn-follow-up response-overlay-btn";
-      followUpBtn.textContent = "Ask follow-up";
-      followUpBtn.addEventListener("click", () => openFollowUpPrompt({ gemId, name, response, card }));
-      actionsEl.appendChild(followUpBtn);
-      const saveFeedback = document.createElement("span");
-      saveFeedback.className = "response-overlay-save-feedback";
-      saveFeedback.hidden = true;
-      saveFeedback.setAttribute("aria-live", "polite");
-      actionsEl.appendChild(saveFeedback);
-    }
+    appendResponseOverlayCardActions(card, { gemId, name, response, error, showSaveButton, gFound });
     const followUp = followUpsByGemId[gemId];
     if (followUp && followUp.length > 0) {
       const block = document.createElement("div");
@@ -2332,45 +2644,68 @@ async function submit() {
     return;
   }
   if (!prompt && attachments.length === 0) return;
+  if (dailyPromptsExhausted()) return;
 
   submitBtn.classList.add("loading");
   submitBtn.disabled = true;
   setStatus("");
   resultsSection.hidden = true;
   if (returnToResponseBtn) returnToResponseBtn.hidden = true;
-  startCouncilLoading();
+  const orderedIdsPreview = orderCouncilMemberIdsForTurn(idsToSend);
+  if (orderedIdsPreview.length <= 1) startCouncilLoading();
+
+  let promptSlotCounted = false;
+  incrementDailyPromptsUsed();
+  promptSlotCounted = true;
 
   try {
-    const body = {
-      selectedGems: idsToSend,
+    const bodyBase = {
       prompt: prompt || "(See attached files.)",
       attachments: attachments.length > 0 ? attachments.map((a) => ({ name: a.name, mimeType: a.mimeType, data: a.data })) : undefined,
     };
-    const res = await fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(chatPayload(body)),
-    });
-
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      setStatus(data.error || "Request failed", "error");
-      return;
-    }
-
-    lastPrompt = prompt || "(Attached files)";
-    lastSelectedGems = idsToSend;
-    lastResults = data.results || [];
-    attachments = [];
-    renderAttachments();
     const jobTitleMap = {};
-    gems.forEach((g) => { jobTitleMap[g.name] = g.jobTitle; });
-    lastResults.forEach((r) => { r.jobTitle = jobTitleMap[r.name] || r.jobTitle; });
-    openResponsesOverlay(lastResults, { showSaveButton: true, jobTitleMap, animate: true });
-    updateReturnToResponseButton();
-    setStatus(`Done. ${lastResults.length} response(s).`, "success");
+    gems.forEach((g) => {
+      jobTitleMap[g.name] = g.jobTitle;
+    });
+    const orderedIds = orderCouncilMemberIdsForTurn(idsToSend);
+
+    if (orderedIds.length > 1) {
+      lastPrompt = prompt || "(Attached files)";
+      lastSelectedGems = idsToSend;
+      lastResults = await runSequentialCouncilChat({ orderedIds, bodyBase, jobTitleMap });
+      attachments = [];
+      renderAttachments();
+      updateReturnToResponseButton();
+      setStatus(`Done. ${lastResults.length} response(s).`, "success");
+    } else {
+      const res = await fetch(APP_KIND === "custom" ? "/api/chat/custom" : "/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(chatPayload({ ...bodyBase, selectedGems: orderedIds })),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (promptSlotCounted) {
+          decrementDailyPromptsUsed();
+          promptSlotCounted = false;
+        }
+        setStatus(data.error || "Request failed", "error");
+        return;
+      }
+      lastPrompt = prompt || "(Attached files)";
+      lastSelectedGems = idsToSend;
+      lastResults = data.results || [];
+      attachments = [];
+      renderAttachments();
+      lastResults.forEach((r) => {
+        r.jobTitle = jobTitleMap[r.name] || r.jobTitle;
+      });
+      openResponsesOverlay(lastResults, { showSaveButton: true, jobTitleMap, animate: true });
+      updateReturnToResponseButton();
+      setStatus(`Done. ${lastResults.length} response(s).`, "success");
+    }
   } catch (err) {
+    if (promptSlotCounted) decrementDailyPromptsUsed();
     setStatus("Network error: " + (err.message || "Could not reach server"), "error");
   } finally {
     stopCouncilLoading();
@@ -2412,6 +2747,7 @@ async function loadGems() {
     setSubmitState();
     if (viewRubricCouncilBtn) viewRubricCouncilBtn.hidden = false;
     applyCouncilPromptCharLimits();
+    applyDailyPromptLimitUi();
     return;
   }
 
@@ -2433,6 +2769,7 @@ async function loadGems() {
   syncPhaseMilestoneTitle();
   setSubmitState();
   syncCouncilEssentialQuestionTagline();
+  applyDailyPromptLimitUi();
 }
 
 function onPhaseChange() {

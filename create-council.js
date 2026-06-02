@@ -201,7 +201,7 @@ function markMemberCardFieldsAiFilled(idx) {
   }
 }
 
-const ALLOWED_GRADE_LEVELS = ["3-5", "6-8", "HS", "Uni+"];
+const ALLOWED_GRADE_LEVELS = ["6-8", "HS", "Uni+"];
 
 const HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION =
   "Human community advisor. This slot represents a **school-community** connection (parent, volunteer, or partner your school coordinates—not an unsupervised internet contact). Encourage students to work through their teacher for introductions, respect privacy, and treat outreach as a supervised classroom activity.";
@@ -213,7 +213,8 @@ function getGradeLevelFromForm() {
 }
 
 function setGradeLevelOnForm(level) {
-  const v = ALLOWED_GRADE_LEVELS.includes(level) ? level : "6-8";
+  const normalized = level === "3-5" ? "6-8" : level;
+  const v = ALLOWED_GRADE_LEVELS.includes(normalized) ? normalized : "6-8";
   document.querySelectorAll('input[name="gradeLevel"]').forEach((inp) => {
     inp.checked = inp.value === v;
   });
@@ -636,7 +637,7 @@ const localExpertModal = { memberIdx: null, data: null };
 function setLocalExpertLoadingMessage(isAnother) {
   const p = document.getElementById("lemLoadingMessage");
   const gl = getGradeLevelFromForm();
-  const k8 = gl === "3-5" || gl === "6-8";
+  const k8 = gl === "6-8";
   if (p) {
     if (k8) {
       p.textContent = isAnother ? "Finding another community member…" : "Finding a school-community match…";
@@ -736,7 +737,7 @@ function applyExpertToMember(idx, data) {
   m.jobTitle = n.title || n.organization || m.jobTitle;
   const gl = getGradeLevelFromForm();
   m.systemInstruction =
-    gl === "3-5" || gl === "6-8"
+    gl === "6-8"
       ? HUMAN_ADVISOR_SCHOOL_COMMUNITY_INSTRUCTION
       : "Human community advisor. This slot is filled by a real-world contact in the educator’s region. Encourage students to connect professionally and verify contact details before outreach.";
   m.image = pickExpertImageUrl(n, display);
