@@ -556,7 +556,7 @@ function assignStockPortraitForAiMemberAt(idx) {
 function shouldMigrateAiImageToStock(image) {
   const s = String(image || "").trim();
   if (!s) return true;
-  if (/^\/portraits\/(male|female)\d{2})\.png$/i.test(s)) return true;
+  if (/^\/portraits\/(male|female)\d{2}\.png$/i.test(s)) return true;
   if (s.startsWith("/portraits/")) return false;
   if (/pollinations\.ai/i.test(s)) return true;
   if (/dicebear\.com/i.test(s)) return true;
@@ -568,7 +568,7 @@ function migrateLegacyPortraitPaths(members) {
   members.forEach((m) => {
     if (!m || m.isHuman) return;
     const s = String(m.image || "").trim();
-    if (/^\/portraits\/(male|female)\d{2})\.png$/i.test(s)) {
+    if (/^\/portraits\/(male|female)\d{2}\.png$/i.test(s)) {
       m.image = s.replace(/\.png$/i, ".webp");
     }
   });
