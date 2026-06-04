@@ -1430,24 +1430,24 @@ function applyReplaceHumanEditorSave() {
 }
 
 const COUNCIL_STOCK_PORTRAIT_MALE = [
-  "/portraits/male01.png",
-  "/portraits/male02.png",
-  "/portraits/male03.png",
-  "/portraits/male04.png",
-  "/portraits/male05.png",
-  "/portraits/male06.png",
-  "/portraits/male07.png",
-  "/portraits/male08.png",
+  "/portraits/male01.webp",
+  "/portraits/male02.webp",
+  "/portraits/male03.webp",
+  "/portraits/male04.webp",
+  "/portraits/male05.webp",
+  "/portraits/male06.webp",
+  "/portraits/male07.webp",
+  "/portraits/male08.webp",
 ];
 const COUNCIL_STOCK_PORTRAIT_FEMALE = [
-  "/portraits/female01.png",
-  "/portraits/female02.png",
-  "/portraits/female03.png",
-  "/portraits/female04.png",
-  "/portraits/female05.png",
-  "/portraits/female06.png",
-  "/portraits/female07.png",
-  "/portraits/female08.png",
+  "/portraits/female01.webp",
+  "/portraits/female02.webp",
+  "/portraits/female03.webp",
+  "/portraits/female04.webp",
+  "/portraits/female05.webp",
+  "/portraits/female06.webp",
+  "/portraits/female07.webp",
+  "/portraits/female08.webp",
 ];
 
 function shuffleCouncilPortraitPool(arr) {
@@ -1468,6 +1468,7 @@ function councilMemberPortraitGender(m) {
 function councilPortraitNeedsMigration(image) {
   const s = String(image || "").trim();
   if (!s) return true;
+  if (/^\/portraits\/(male|female)\d{2})\.png$/i.test(s)) return true;
   if (s.startsWith("/portraits/")) return false;
   if (/pollinations\.ai/i.test(s)) return true;
   if (/dicebear\.com/i.test(s)) return true;
@@ -1511,6 +1512,13 @@ function assignStockPortraitsToCouncilMembersList(members) {
 function maybeMigrateCouncilPortraits() {
   const members = customCouncilProject?.members;
   if (!Array.isArray(members)) return;
+  members.forEach((m) => {
+    if (!m || m.isHuman) return;
+    const s = String(m.image || "").trim();
+    if (/^\/portraits\/(male|female)\d{2})\.png$/i.test(s)) {
+      m.image = s.replace(/\.png$/i, ".webp");
+    }
+  });
   if (!members.some((m) => !m.isHuman && councilPortraitNeedsMigration(m.image))) return;
   assignStockPortraitsToCouncilMembersList(members);
   persistCustomCouncil();
