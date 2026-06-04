@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Create PBL Council</title>
+  <title>Stakeholder Council Creator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -11,30 +11,60 @@
   <link rel="stylesheet" href="creator.css" />
 </head>
 <body class="creator-body">
-  <div class="layout layout-wide">
-    <nav class="site-nav" aria-label="Site">
-      <a href="/home.html" class="site-nav-link">← All councils</a>
-    </nav>
-
-    <header class="creator-header creator-header-row">
-      <div class="creator-header-text">
-        <h1>Create New Stakeholder Council</h1>
+  <header class="council-top-bar creator-top-bar" aria-label="Site">
+    <div class="creator-top-bar-brand">
+      <a href="/home.html" class="council-top-logo">KONSULT</a>
+      <a href="/home.html" class="council-top-home-btn">Home</a>
+    </div>
+    <h1 class="council-top-bar-title creator-page-title" id="creatorPageTitle">Stakeholder Council Creator</h1>
+    <div class="council-top-bar-end">
+      <div class="council-menu-wrap">
+        <button
+          type="button"
+          class="council-menu-btn"
+          id="teacherMenuBtn"
+          aria-label="Teacher menu"
+          aria-haspopup="true"
+          aria-expanded="false"
+          title="Menu"
+        >
+          <span class="council-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <div class="council-menu-dropdown creator-teacher-dropdown" id="teacherMenuDropdown" hidden>
+          <div class="council-menu-actions">
+            <button type="button" class="council-menu-row" id="teacherMenuPreLaunchBtn">
+              Pre-Launch Reflection
+            </button>
+            <button
+              type="button"
+              class="council-menu-row teacher-menu-row--disabled"
+              id="teacherMenuRubricsBtn"
+              disabled
+              title="Wiring in progress"
+            >
+              Rubric access <span class="teacher-menu-soon">(when wired)</span>
+            </button>
+          </div>
+        </div>
       </div>
-      <button type="button" class="teacher-menu-btn" id="teacherMenuBtn" aria-label="Teacher menu" title="Teacher menu">
-        <span class="teacher-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
-      </button>
-    </header>
+      <span class="council-top-copyright">© Bob Kelly 2026</span>
+    </div>
+  </header>
+  <div class="layout layout-wide">
 
     <form id="creatorForm" class="creator-form" onsubmit="return false;">
       <section class="creator-block">
-        <h2 class="creator-block-title">1. Project brief - START HERE!</h2>
-        <p class="creator-hint">Upload a brief that outlines phases, objective, constraints, and timeline. If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
+        <h2 class="creator-block-title">
+          1. Project brief —
+          <span class="creator-start-here">START HERE!</span><span class="creator-start-arrow" aria-hidden="true">&lt;</span>
+        </h2>
+        <p class="creator-hint">Upload a lesson plan or project brief. If the project title is blank, it will be filled from the brief when possible. You can also paste a summary below for the AI.</p>
         <p class="draft-brief-note" id="draftBriefNote" hidden>This draft includes a saved project brief file. Upload a new file to replace it.</p>
         <input type="file" id="briefFile" accept=".pdf,.txt,.md,.html,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/*" class="creator-file" />
-        <label class="creator-label" for="projectSummary">Summary for AI (paste key points if the file is large)</label>
-        <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the project brief…"></textarea>
         <label class="creator-label" for="projectTitle">Project title</label>
         <input type="text" id="projectTitle" class="creator-input" placeholder="e.g. Our Community Water Story" required />
+        <label class="creator-label" for="projectSummary">Optional Summary for AI (paste key points if the file is large)</label>
+        <textarea id="projectSummary" class="creator-textarea" rows="4" placeholder="Paste or type a concise summary of the lesson plan or project brief…"></textarea>
         <fieldset class="grade-level-fieldset">
           <legend class="creator-label">Grade level</legend>
           <div class="grade-level-options">
@@ -48,9 +78,9 @@
       <section class="creator-block">
         <h2 class="creator-block-title">2. Essential question</h2>
         <p class="creator-hint">
-          The driving question that frames the unit. Uploading a project brief can fill this automatically.
+          The driving question that frames the unit or project. Uploading a project brief can fill this automatically.
         </p>
-        <label class="creator-label" for="essentialQuestion">Essential question</label>
+        <label class="creator-label" for="essentialQuestion"></label>
         <textarea
           id="essentialQuestion"
           class="creator-textarea"
@@ -60,7 +90,7 @@
       </section>
 
       <section class="creator-block">
-        <h2 class="creator-block-title">3. Supporting documents</h2>
+        <h2 class="creator-block-title">3. Supporting documents (Optional)</h2>
         <p class="creator-hint">
           Standards, rubrics, or additional context.
         </p>
@@ -88,17 +118,43 @@
       <section class="creator-block">
         <h2 class="creator-block-title">6. Council members</h2>
         <p class="creator-hint">Recommended one member per project phase. Click Globe icon to search for a local expert.</p>
-        <div class="creator-toolbar">
-          <label>Council size
-            <select id="memberCount" class="creator-select">
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4" selected>4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-            </select>
-          </label>
-          <button type="button" class="btn-cta-green" id="suggestMembersBtn">Generate Council</button>
+        <div class="creator-members-toolbar">
+          <div class="creator-members-toolbar-row">
+            <div class="creator-member-count-stack">
+              <label class="creator-member-count-label" for="memberCount">Council size</label>
+              <select id="memberCount" class="creator-select">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+              </select>
+              <button type="button" class="btn-cta-green" id="suggestMembersBtn">Generate Council</button>
+            </div>
+            <div class="creator-council-ratio">
+              <span class="creator-ratio-heading">Human / AI mix</span>
+              <div class="council-ratio-slider">
+                <img src="icons/icon-expert.png" alt="" class="council-ratio-icon" width="36" height="36" decoding="async" />
+                <div class="council-ratio-track-wrap">
+                  <div class="council-ratio-track" id="councilRatioTrack" aria-hidden="true">
+                    <div class="council-ratio-fill" id="councilRatioFill"></div>
+                  </div>
+                  <input
+                    type="range"
+                    class="council-ratio-input"
+                    id="councilRatioSlider"
+                    min="0"
+                    max="4"
+                    value="2"
+                    step="1"
+                    aria-label="Council mix: drag toward human icon for more human members, toward AI icon for more AI"
+                  />
+                </div>
+                <img src="icons/icon-ai.png" alt="" class="council-ratio-icon" width="36" height="36" decoding="async" />
+              </div>
+              <p class="creator-ratio-caption" id="councilRatioCaption" aria-live="polite">2 human · 2 AI</p>
+            </div>
+          </div>
         </div>
         <div id="memberCards" class="member-cards"></div>
       </section>
@@ -181,34 +237,6 @@
   </div>
 
   <div
-    class="teacher-menu-overlay"
-    id="teacherMenuModal"
-    hidden
-    aria-modal="true"
-    role="dialog"
-    aria-labelledby="teacherMenuTitle"
-  >
-    <div class="teacher-menu-backdrop" data-close-tm="1"></div>
-    <div class="teacher-menu-panel">
-      <h2 class="teacher-menu-title" id="teacherMenuTitle">Teacher menu</h2>
-      <p class="teacher-menu-lead">Saved reflections stay with this draft and launch with your council.</p>
-      <button type="button" class="teacher-menu-row" id="teacherMenuPreLaunchBtn">
-        Pre-Launch Reflection
-      </button>
-      <button
-        type="button"
-        class="teacher-menu-row teacher-menu-row--disabled"
-        id="teacherMenuRubricsBtn"
-        disabled
-        title="Wiring in progress"
-      >
-        Rubric access <span class="teacher-menu-soon">(when wired)</span>
-      </button>
-      <button type="button" class="btn-secondary teacher-menu-close" data-close-tm="1">Close</button>
-    </div>
-  </div>
-
-  <div
     class="prelaunch-overlay"
     id="preLaunchModal"
     hidden
@@ -238,5 +266,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
   <script src="md-inline.js"></script>
   <script src="create-council.js"></script>
+  <script src="konsult-logo.js" defer></script>
 </body>
 </html>

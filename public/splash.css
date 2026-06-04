@@ -135,12 +135,16 @@
   }
 }
 
-/* Exit: photo + edge vignette fade out to black (5s), then navigate */
-.splash-body.splash-exiting .splash-bg-pan {
+/* Exit: cross-fade foreground and photo to black, then navigate to home */
+.splash-body.splash-exiting .splash-bg-pan,
+.splash-body.splash-exiting .splash-bg-edge-fade,
+.splash-body.splash-exiting .splash-main,
+.splash-body.splash-exiting .splash-music-credit {
   opacity: 0;
+  transition: opacity 1.35s ease-in-out;
 }
-.splash-body.splash-exiting .splash-bg-edge-fade {
-  opacity: 0;
+.splash-body.splash-exiting .splash-bg-blackout {
+  opacity: 1;
 }
 .splash-body.splash-exiting .splash-enter {
   pointer-events: none;

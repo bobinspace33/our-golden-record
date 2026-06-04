@@ -1,6 +1,48 @@
 const STORAGE_KEY = "aiCouncilSavedProjects";
 const DRAFT_STORAGE_KEY = "aiCouncilTemplateDrafts";
 
+/** Card backgrounds (exclude composite used for splash entrance). */
+const HOME_CARD_BACKGROUNDS = [
+  "backgrounds/deep-wKKm7mbVn74-unsplash.jpg",
+  "backgrounds/deep-26QAI-R8-3k-unsplash.jpg",
+  "backgrounds/deep-47_wA-2WAF4-unsplash.jpg",
+  "backgrounds/deep-PGoUHDVRBcA-unsplash.jpg",
+  "backgrounds/deep-Ts9_sclEn5k-unsplash.jpg",
+  "backgrounds/deep-h7Pjlkw-cm4-unsplash.jpg",
+  "backgrounds/deep-ObF3BoYi3Oc-unsplash.jpg",
+  "backgrounds/deep-3YErd7Gwol0-unsplash.jpg",
+  "backgrounds/deep-isf0PELGzBE-unsplash.jpg",
+  "backgrounds/deep-CW-b-vBKa5U-unsplash.jpg",
+  "backgrounds/deep-pd5BHCzh2Q4-unsplash.jpg",
+  "backgrounds/deep-Sx9psSuvK4M-unsplash.jpg",
+  "backgrounds/deep-j-oNlEbFrpU-unsplash.jpg",
+  "backgrounds/deep-bQs3iP_7JtA-unsplash.jpg",
+  "backgrounds/deep-0KMGN2FYW78-unsplash.jpg",
+  "backgrounds/deep-K92pByP9tPQ-unsplash.jpg",
+  "backgrounds/sliver1.png",
+  "backgrounds/sliver2.png",
+  "backgrounds/sliver3.png",
+  "backgrounds/sliver4.png",
+  "backgrounds/sliver5.png",
+  "backgrounds/sliver6.png",
+];
+
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickCardBackgroundUrls(count) {
+  const pool = shuffleArray(HOME_CARD_BACKGROUNDS);
+  const urls = [];
+  for (let i = 0; i < count; i++) urls.push(pool[i % pool.length]);
+  return urls;
+}
+
 function loadSaved() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -116,6 +158,9 @@ async function loadBuiltin() {
         id: "golden-record",
         title: "Our Golden Record AI Council",
         description: "Interdisciplinary PBL — community record for the ages.",
+        essentialQuestion:
+          "How can our community tell its story to the world in a way that includes every voice?",
+        gradeLevel: "6-8",
         href: "/golden-record.html",
         builtin: true,
       },
@@ -132,39 +177,95 @@ function formatDraftDate(iso) {
   }
 }
 
-function renderDraftList() {
-  const list = document.getElementById("draftList");
-  const empty = document.getElementById("draftEmpty");
-  if (!list) return;
-  const drafts = loadDrafts().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  list.innerHTML = "";
-  if (drafts.length === 0) {
-    if (empty) empty.hidden = false;
-    return;
+function formatGradeLabel(gradeLevel) {
+  const g = String(gradeLevel || "").trim();
+  const map = { "6-8": "Grades 6–8", HS: "High school", "Uni+": "Uni+" };
+  return map[g] || g;
+}
+
+function projectCardSubtitle(row) {
+  if (row.isDraft) {
+    const when = formatDraftDate(row.updatedAt);
+    const phase = row.subtitle;
+    if (phase && when) return `${phase} · Saved ${when}`;
+    if (phase) return phase;
+    if (when) return `Saved ${when}`;
+    return "Continue editing";
   }
-  if (empty) empty.hidden = true;
-  drafts.forEach((d) => {
-    const li = document.createElement("li");
-    li.className = "project-list-item";
-    const rowWrap = document.createElement("div");
-    rowWrap.className = "project-list-row";
-    const a = document.createElement("a");
-    a.className = "project-list-link";
-    a.href = `/create.html?draft=${encodeURIComponent(d.id)}`;
-    const when = formatDraftDate(d.updatedAt);
-    a.innerHTML = `
-      <span class="project-list-title">${escapeHtml(d.title || "Untitled draft")}</span>
-      <span class="project-list-desc">${when ? `Saved ${escapeHtml(when)}` : "Continue editing"}</span>
-      <span class="project-list-badge">Draft</span>
-    `;
-    const actions = document.createElement("div");
-    actions.className = "project-list-card-actions";
-    actions.appendChild(createTeacherMenuRowButton({ kind: "draft", id: d.id }));
-    rowWrap.appendChild(a);
-    rowWrap.appendChild(actions);
-    li.appendChild(rowWrap);
-    list.appendChild(li);
-  });
+  return row.subtitle || "";
+}
+
+function buildProjectCardInnerHtml(row) {
+  const displayTitle = row.isDraft
+    ? `${row.title || "Untitled draft"} (DRAFT)`
+    : row.title || (row.isDraft ? "Untitled draft" : "Untitled council");
+  const grade = formatGradeLabel(row.gradeLevel);
+  const subtitle = projectCardSubtitle(row);
+  const eq = String(row.essentialQuestion || "").trim();
+  const parts = [
+    `<div class="project-list-card-top">`,
+    `<span class="project-list-title">${escapeHtml(displayTitle)}</span>`,
+    grade ? `<span class="project-list-grade">${escapeHtml(grade)}</span>` : "",
+    `</div>`,
+  ];
+  if (subtitle) parts.push(`<span class="project-list-desc">${escapeHtml(subtitle)}</span>`);
+  if (eq) parts.push(`<span class="project-list-essential">${escapeHtml(eq)}</span>`);
+  if (row.badge) parts.push(`<span class="project-list-badge">${escapeHtml(row.badge)}</span>`);
+  return parts.join("");
+}
+
+function appendProjectListRow(list, row, cardBgUrl) {
+  const li = document.createElement("li");
+  li.className = "project-list-item";
+  const rowWrap = document.createElement("div");
+  rowWrap.className = "project-list-row";
+  const a = document.createElement("a");
+  a.className = "project-list-link" + (row.isDraft ? " project-list-link--draft" : "");
+  a.href = row.href;
+  if (cardBgUrl) {
+    a.style.setProperty("--card-bg-image", `url("${cardBgUrl}")`);
+  }
+  a.innerHTML = buildProjectCardInnerHtml(row);
+  const labelTitle = row.title || (row.isDraft ? "Untitled draft" : "Untitled council");
+  const actions = document.createElement("div");
+  actions.className = "project-list-card-actions";
+
+  if (row.isDraft) {
+    actions.appendChild(createTeacherMenuRowButton({ kind: "draft", id: row.id }));
+  } else if (row.builtin) {
+    attachShareIconButton(actions, {
+      labelTitle,
+      getUrl: () => new URL(row.href || "/golden-record.html", window.location.origin).href,
+    });
+  } else {
+    actions.appendChild(createTeacherMenuRowButton({ kind: "saved", id: row.id }));
+    attachShareIconButton(actions, {
+      labelTitle,
+      getUrl: () => councilShareUrl(row.id),
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "project-list-icon-btn project-list-icon-delete";
+    del.setAttribute("aria-label", `Delete ${labelTitle}`);
+    del.innerHTML = ICON_TRASH_SVG;
+    del.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!confirm(`Delete "${labelTitle}" from your saved councils? This cannot be undone.`)) return;
+      deleteSavedCouncilById(row.id);
+      render();
+    });
+    actions.appendChild(del);
+  }
+
+  rowWrap.appendChild(a);
+  rowWrap.appendChild(actions);
+  li.appendChild(rowWrap);
+  list.appendChild(li);
+}
+
+function renderDraftList() {
+  /* Drafts are listed in render() under Your councils. */
 }
 
 function render() {
@@ -172,95 +273,68 @@ function render() {
   const empty = document.getElementById("homeEmpty");
   if (!list) return;
 
-  renderDraftList();
-
   const saved = loadSaved();
-  const builtins = [];
+  const drafts = loadDrafts().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
   loadBuiltin().then((projects) => {
-    projects.forEach((p) => {
-      builtins.push({
-        id: p.id,
-        title: p.title,
-        description: p.description || "",
-        href: p.href || "/golden-record.html",
-        builtin: true,
-      });
+    const builtins = (projects || []).map((p) => ({
+      id: p.id,
+      title: p.title,
+      subtitle: p.description || "",
+      essentialQuestion: p.essentialQuestion || "",
+      gradeLevel: p.gradeLevel || "6-8",
+      href: p.href || "/golden-record.html",
+      builtin: true,
+      badge: "Built-in",
+      updatedAt: "9999-12-31",
+      isDraft: false,
+    }));
+
+    const draftRows = drafts.map((d) => {
+      const snap = d.snapshot || {};
+      const phases = Array.isArray(snap.phases) ? snap.phases : [];
+      const firstPhase = phases.find((p) => (p?.title || "").trim()) || phases[0];
+      return {
+        id: d.id,
+        title: d.title || "Untitled draft",
+        subtitle: (firstPhase?.title || "").trim(),
+        essentialQuestion: snap.essentialQuestion || "",
+        gradeLevel: snap.gradeLevel || "",
+        href: `/create.html?draft=${encodeURIComponent(d.id)}`,
+        updatedAt: d.updatedAt,
+        isDraft: true,
+        builtin: false,
+        badge: "",
+      };
     });
+
+    const savedRows = saved.map((s) => ({
+      id: s.id,
+      title: s.title || "Untitled council",
+      subtitle: s.description || s.config?.phases?.[0]?.title || "",
+      essentialQuestion: s.config?.essentialQuestion || "",
+      gradeLevel: s.config?.gradeLevel || "",
+      href: `/council.html?saved=${encodeURIComponent(s.id)}`,
+      updatedAt: s.updatedAt || "",
+      isDraft: false,
+      builtin: false,
+      badge: "",
+    }));
+
+    const merged = [...draftRows, ...savedRows].sort(
+      (a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)
+    );
+    const rows = [...builtins, ...merged];
 
     list.innerHTML = "";
-    const rows = [...builtins, ...saved.map((s) => ({ ...s, builtin: false }))];
-
     if (rows.length === 0) {
-      empty.hidden = false;
+      if (empty) empty.hidden = false;
       return;
     }
-    empty.hidden = true;
+    if (empty) empty.hidden = true;
 
-    rows.forEach((row) => {
-      const li = document.createElement("li");
-      li.className = "project-list-item";
-      const a = document.createElement("a");
-      a.className = "project-list-link";
-      a.href = row.builtin ? row.href : `/council.html?saved=${encodeURIComponent(row.id)}`;
-      a.innerHTML = `
-        <span class="project-list-title">${escapeHtml(row.title || "Untitled council")}</span>
-        ${row.description ? `<span class="project-list-desc">${escapeHtml(row.description)}</span>` : ""}
-        ${row.builtin ? `<span class="project-list-badge">Built-in</span>` : ""}
-      `;
-      if (row.builtin) {
-        const rowWrap = document.createElement("div");
-        rowWrap.className = "project-list-row";
-        const labelTitle = row.title || "this council";
-        const actions = document.createElement("div");
-        actions.className = "project-list-card-actions";
-        attachShareIconButton(actions, {
-          labelTitle,
-          getUrl: () => new URL(row.href || "/golden-record.html", window.location.origin).href,
-        });
-        rowWrap.appendChild(a);
-        rowWrap.appendChild(actions);
-        li.appendChild(rowWrap);
-      } else {
-        const rowWrap = document.createElement("div");
-        rowWrap.className = "project-list-row";
-        const labelTitle = row.title || "Untitled council";
-        const actions = document.createElement("div");
-        actions.className = "project-list-card-actions";
-
-        actions.appendChild(createTeacherMenuRowButton({ kind: "saved", id: row.id }));
-
-        attachShareIconButton(actions, {
-          labelTitle,
-          getUrl: () => councilShareUrl(row.id),
-        });
-
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "project-list-icon-btn project-list-icon-delete";
-        del.setAttribute("aria-label", `Delete ${labelTitle}`);
-        del.innerHTML = ICON_TRASH_SVG;
-        del.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (
-            !confirm(
-              `Delete "${labelTitle}" from your saved councils? This cannot be undone.`
-            )
-          ) {
-            return;
-          }
-          deleteSavedCouncilById(row.id);
-          render();
-        });
-
-        actions.appendChild(del);
-        rowWrap.appendChild(a);
-        rowWrap.appendChild(actions);
-        li.appendChild(rowWrap);
-      }
-      list.appendChild(li);
-    });
+    const cardBgs = pickCardBackgroundUrls(rows.length);
+    rows.forEach((row, i) => appendProjectListRow(list, row, cardBgs[i]));
   });
 }
 
@@ -464,4 +538,63 @@ function initHomeTeacherModals() {
 }
 
 initHomeTeacherModals();
+
+function initHomeSplashEntrance() {
+  let fromSplash = false;
+  try {
+    fromSplash = sessionStorage.getItem("konsultFromSplash") === "1";
+    if (fromSplash) sessionStorage.removeItem("konsultFromSplash");
+  } catch {
+    /* ignore */
+  }
+  if (!fromSplash) return;
+
+  const entrance = document.getElementById("homeEntrance");
+  const img = entrance?.querySelector(".home-entrance-composite");
+  if (!entrance || !img) return;
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.body.classList.add("home-from-splash");
+  entrance.hidden = false;
+  entrance.setAttribute("aria-hidden", "false");
+  entrance.classList.add("home-entrance--crossfade", "home-entrance--visible");
+
+  const finishEntrance = () => {
+    if (entrance.hidden) return;
+    entrance.classList.add("home-entrance--cleared");
+    entrance.hidden = true;
+    entrance.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("home-from-splash");
+    document.body.classList.add("home-entrance-done");
+    window.setTimeout(() => {
+      entrance.classList.remove("home-entrance--visible", "home-entrance--exit", "home-entrance--cleared", "home-entrance--crossfade");
+    }, 50);
+  };
+
+  if (reducedMotion) {
+    finishEntrance();
+    return;
+  }
+
+  const crossfadeMs = 1350;
+  const holdMs = 3000;
+  const slideMs = 2000;
+
+  img.addEventListener(
+    "animationend",
+    (e) => {
+      if (e.animationName !== "home-entrance-slide-down") return;
+      finishEntrance();
+    },
+    { once: true }
+  );
+
+  window.setTimeout(() => {
+    entrance.classList.add("home-entrance--exit");
+  }, crossfadeMs + holdMs);
+
+  window.setTimeout(finishEntrance, crossfadeMs + holdMs + slideMs + 120);
+}
+
+initHomeSplashEntrance();
 render();

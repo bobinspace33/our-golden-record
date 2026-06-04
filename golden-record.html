@@ -15,37 +15,51 @@
       <a href="/home.html" class="council-top-logo">KONSULT</a>
       <a href="/home.html" class="council-top-home-btn">Home</a>
     </div>
-    <span class="council-top-copyright">© Bob Kelly 2025</span>
-  </header>
-  <div class="layout">
-    <header class="header">
-      <div class="header-row">
-        <h1>Our Golden Record AI Council</h1>
-        <div class="recent-chats-wrap">
-          <button type="button" class="recent-chats-btn" id="recentChatsBtn" aria-haspopup="true" aria-expanded="false">Recent Chats</button>
-          <div class="recent-chats-dropdown" id="recentChatsDropdown" hidden>
+    <h1 class="council-top-bar-title" id="councilPageTitle">Our Golden Record AI Council</h1>
+    <div class="council-top-bar-end">
+      <div class="council-menu-wrap">
+        <button
+          type="button"
+          class="council-menu-btn"
+          id="councilMenuBtn"
+          aria-label="Council menu"
+          aria-haspopup="true"
+          aria-expanded="false"
+          title="Menu"
+        >
+          <span class="council-menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <div class="council-menu-dropdown" id="councilMenuDropdown" hidden>
+          <p class="council-menu-label">Recent chats</p>
+          <div class="council-menu-recent-chats">
             <div class="recent-chats-list" id="recentChatsList"></div>
             <p class="recent-chats-empty" id="recentChatsEmpty">No saved chats yet.</p>
           </div>
+          <div class="council-menu-actions">
+            <a
+              href="/document/project-brief"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="council-menu-row project-brief-btn"
+              id="projectBriefMenuLink"
+            >Project Brief</a>
+          </div>
         </div>
       </div>
-      <p class="tagline">Select council members, send one prompt, get separate responses</p>
-    </header>
+      <span class="council-top-copyright">© Bob Kelly 2026</span>
+    </div>
+  </header>
+  <div class="layout">
+    <p class="tagline">Select council members, send one prompt, get separate responses</p>
 
     <section class="phase-section">
       <span class="phase-label">Project Phase</span>
-      <div class="phase-options" role="group" aria-label="Project Phase">
-        <label class="phase-option"><input type="radio" name="projectPhase" value="1" checked /> 1</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="2" /> 2</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="3" /> 3</label>
-        <label class="phase-option"><input type="radio" name="projectPhase" value="4" /> 4</label>
+      <div class="phase-toggle-group phase-options" id="phaseOptions" role="radiogroup" aria-label="Project Phase">
+        <button type="button" class="phase-toggle phase-toggle--active" data-phase="1" aria-pressed="true">1</button>
+        <button type="button" class="phase-toggle" data-phase="2" aria-pressed="false">2</button>
+        <button type="button" class="phase-toggle" data-phase="3" aria-pressed="false">3</button>
+        <button type="button" class="phase-toggle" data-phase="4" aria-pressed="false">4</button>
       </div>
-      <a
-        href="/document/project-brief"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="project-brief-btn"
-      >Project Brief</a>
     </section>
 
     <div class="phase-milestone-block">
@@ -57,7 +71,7 @@
     </div>
 
     <section class="gems-section">
-      <h2>Select Members</h2>
+      <h2>Project Council</h2>
       <div class="gems-grid" id="gemsGrid">
         <!-- Filled by JS -->
       </div>
@@ -179,5 +193,6 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="konsult-logo.js" defer></script>
 </body>
 </html>

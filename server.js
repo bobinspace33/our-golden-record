@@ -993,6 +993,9 @@ app.get("/api/projects", (req, res) => {
         id: "golden-record",
         title: "Our Golden Record AI Council",
         description: "Interdisciplinary PBL — community record for the ages.",
+        essentialQuestion:
+          "How can our community tell its story to the world in a way that includes every voice?",
+        gradeLevel: "6-8",
         href: "/golden-record.html",
         builtin: true,
       },
@@ -1338,6 +1341,45 @@ Reply with ONLY valid JSON (no markdown fences):
   }
 });
 
+/** Full-name examples for Gemini council generation—varied backgrounds; invent new names, do not copy verbatim. */
+const COUNCIL_MEMBER_NAME_EXAMPLES = [
+  "Amara Okafor",
+  "Marcus Thorne",
+  "Elena Volkov",
+  "Vikram Singh",
+  "Sofia Delgado",
+  "Jonah Whitmore",
+  "Mei Chen",
+  "Rafael Ortega",
+  "Ingrid Svensson",
+  "Priya Nair",
+  "Diego Morales",
+  "Hannah Kowalski",
+  "Kwame Mensah",
+  "Lena Okonkwo",
+  "Theo Nakamura",
+  "Yasmin Haddad",
+  "Clara Beaumont",
+  "Malik Rahman",
+  "Nina Petrov",
+  "Owen Gallagher",
+  "Zara Abbasi",
+  "Felix Dumont",
+  "Imani Brooks",
+  "Lucia Ferraro",
+  "Henrik Lindqvist",
+  "Camille Dubois",
+  "Arjun Mehta",
+  "Bianca Romero",
+  "Samuel Okello",
+  "Theresa Nguyen",
+];
+
+function councilMemberNameInspirationLine() {
+  const picks = COUNCIL_MEMBER_NAME_EXAMPLES.slice(0, 14).join(", ");
+  return `- Invent **original** memorable names (first + last when possible). Style reference only—do NOT reuse these verbatim and avoid duplicate surnames in one council: ${picks}.`;
+}
+
 app.post("/api/creator/suggest-members", async (req, res) => {
   if (!GEMINI_API_KEY) {
     return res.status(503).json({ error: "Server missing GEMINI_API_KEY." });
@@ -1382,6 +1424,7 @@ ${phaseCountNote}
 
 Requirements for ALL ${count} members:
 - Each needs a specific, memorable first name (or first + last) and a clear job title. **No two members may cover the same primary angle**—spread expertise across distinct domains (e.g. only one physical/science lens, one community/cultural lens, one literacy or storytelling lens, one ethics or civics lens, one quantitative or technical lens). If overlap is unavoidable, differentiate sharply in **method** (e.g. ethnographic interviews vs GIS maps vs youth podcast production).
+${councilMemberNameInspirationLine()}
 - Give each member a **different "thinking fingerprint"**: one might lean on measurement and constraints; another on ethics and who benefits; another on oral history and narrative; another on prototyping and testing; another on policy or institutional partnerships—assign explicitly in the text so voices cannot collapse into the same advice.
 - Each systemInstruction must be **140–320 words** and structured as plain prose with ALL of: (1) **Background**: 1–2 sentences of plausible lived/work experience (specific institutions, regions, or communities types—not vague "many years"). (2) **Expertise**: two narrow specialties written as noun phrases (not single generic labels like "science"). (3) **What they push students to notice**: typical blind spots or tensions only their lens surfaces. (4) **Signature move**: one repeatable coaching habit (e.g. always asks for evidence sources, always asks whose voice is missing, always asks for a cheap prototype). (5) **Anti-pattern**: one thing this advisor refuses to do (e.g. won't pick topics for the team, won't praise without a probing question).
 - **Anti-repetition (critical):** Members must NOT share the same opening hooks, moral-of-the-story framings, clichés ("think critically", "dig deeper" without a prompt), or identical question stems. If two answers could start with the same sentence, rewrite until they diverge.
@@ -1506,6 +1549,7 @@ Your NEW role must fill a clear **gap**: a different discipline, community voice
     : "";
 
   const prompt = `Create ONE new AI council member role for this PBL project. Use a different name than: ${avoid}.
+${councilMemberNameInspirationLine()}
 ${coverageInstruction}
 
 Project: ${projectSummary}

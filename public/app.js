@@ -5,8 +5,8 @@ const submitBtn = document.getElementById("submitBtn");
 const resultsSection = document.getElementById("resultsSection");
 const resultsList = document.getElementById("resultsList");
 const statusEl = document.getElementById("status");
-const recentChatsBtn = document.getElementById("recentChatsBtn");
-const recentChatsDropdown = document.getElementById("recentChatsDropdown");
+const councilMenuBtn = document.getElementById("councilMenuBtn");
+const councilMenuDropdown = document.getElementById("councilMenuDropdown");
 const recentChatsList = document.getElementById("recentChatsList");
 const recentChatsEmpty = document.getElementById("recentChatsEmpty");
 const sendToOverlay = document.getElementById("sendToOverlay");
@@ -609,6 +609,7 @@ function updateRubricCouncilButton() {
   viewRubricCouncilBtn.classList.remove("phase-view-rubric-btn--disabled");
   viewRubricCouncilBtn.title = "";
   viewRubricCouncilBtn.textContent = hasRubricForCurrentPhase() ? "View Rubric" : "Create Rubric";
+  updateCouncilMenuItems();
 }
 
 let rubricEditSupportingStaging = [];
@@ -830,18 +831,19 @@ function loadSavedProjectIntoSession(savedId) {
 }
 
 function buildPhaseSectionFromProject() {
-  const optionsEl = document.querySelector(".phase-options");
+  const optionsEl = document.getElementById("phaseOptions");
   if (!optionsEl || !customCouncilProject?.phases?.length) return;
   const phases = customCouncilProject.phases;
   optionsEl.innerHTML = phases
-    .map(
-      (_, i) =>
-        `<label class="phase-option"><input type="radio" name="projectPhase" value="${i + 1}" ${i === 0 ? "checked" : ""} /> ${i + 1}</label>`
-    )
+    .map((p, i) => {
+      const num = String(i + 1);
+      const phaseTitle = String(p.title || "").trim();
+      const active = i === 0;
+      const ariaLabel = phaseTitle ? `Phase ${num}: ${phaseTitle}` : `Phase ${num}`;
+      return `<button type="button" class="phase-toggle${active ? " phase-toggle--active" : ""}" data-phase="${num}" aria-label="${escapeHtml(ariaLabel)}" aria-pressed="${active ? "true" : "false"}">${num}</button>`;
+    })
     .join("");
-  document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
-    radio.addEventListener("change", onPhaseChange);
-  });
+  initPhaseToggleGroup(optionsEl);
   const briefLink = document.getElementById("customProjectBriefLink");
   const att = customCouncilProject.briefAttachment;
   if (briefLink && att?.data) {
@@ -852,6 +854,7 @@ function buildPhaseSectionFromProject() {
     briefLink.hidden = false;
   }
   updateRubricCouncilButton();
+  updateCouncilMenuItems();
 }
 
 // Phase 1: Jane only. 2: Jane, Carl, Henrietta. 3: + Wolfgang. 4: all.
@@ -879,8 +882,34 @@ function getEnabledMemberIds(phase) {
 }
 
 function getProjectPhase() {
-  const r = document.querySelector('input[name="projectPhase"]:checked');
-  return r ? r.value : "1";
+  const active = document.querySelector(".phase-toggle--active");
+  return active?.dataset?.phase || "1";
+}
+
+function initPhaseToggleGroup(container) {
+  if (!container) return;
+  container.querySelectorAll(".phase-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      container.querySelectorAll(".phase-toggle").forEach((b) => {
+        b.classList.remove("phase-toggle--active");
+        b.setAttribute("aria-pressed", "false");
+      });
+      btn.classList.add("phase-toggle--active");
+      btn.setAttribute("aria-pressed", "true");
+      onPhaseChange();
+    });
+  });
+}
+
+function setCouncilMenuOpen(open) {
+  if (!councilMenuDropdown) return;
+  councilMenuDropdown.hidden = !open;
+  if (councilMenuBtn) councilMenuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function updateCouncilMenuItems() {
+  const rubricBtn = document.getElementById("viewRubricCouncilBtn");
+  if (rubricBtn) rubricBtn.hidden = APP_KIND !== "custom";
 }
 
 /** Normalize ids so numeric member ids stay comparable across string/number mismatches. */
@@ -968,6 +997,14 @@ function syncCouncilEssentialQuestionTagline() {
   const eq = String(customCouncilProject.essentialQuestion || "").trim();
   el.textContent = eq;
   el.hidden = !eq;
+}
+
+function setCouncilPageTitle(text) {
+  const titleEl = document.getElementById("councilPageTitle");
+  if (titleEl) titleEl.textContent = text || "Your PBL Council";
+  if (typeof document !== "undefined" && document.title) {
+    document.title = text ? `${text} — Council` : "Your PBL Council";
+  }
 }
 
 function setStatus(message, type = "") {
@@ -2345,7 +2382,7 @@ function openSendToOverlay(source) {
     sendToList.appendChild(item);
   });
   sendToOverlay.hidden = false;
-  recentChatsDropdown.hidden = true;
+  setCouncilMenuOpen(false);
 }
 
 function closeSendToOverlay() {
@@ -2603,7 +2640,7 @@ function loadRecentChats() {
               openResponsesOverlay(c.results || [], { showSaveButton: false, jobTitleMap, animate: false });
               updateReturnToResponseButton();
               setSubmitState();
-              recentChatsDropdown.hidden = true;
+              setCouncilMenuOpen(false);
               setStatus("Loaded saved chat.");
             });
         });
@@ -2612,26 +2649,16 @@ function loadRecentChats() {
     });
 }
 
-recentChatsBtn.addEventListener("click", (e) => {
+councilMenuBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
-  const open = !recentChatsDropdown.hidden;
-  recentChatsDropdown.hidden = open;
-  if (!open) {
-    loadRecentChats();
-    recentChatsBtn.setAttribute("aria-expanded", "true");
-  } else {
-    recentChatsBtn.setAttribute("aria-expanded", "false");
-  }
+  const willOpen = councilMenuDropdown?.hidden !== false;
+  setCouncilMenuOpen(willOpen);
+  if (willOpen) loadRecentChats();
 });
 
-document.body.addEventListener("click", () => {
-  if (!recentChatsDropdown.hidden) {
-    recentChatsDropdown.hidden = true;
-    recentChatsBtn.setAttribute("aria-expanded", "false");
-  }
-});
+document.body.addEventListener("click", () => setCouncilMenuOpen(false));
 
-recentChatsDropdown.addEventListener("click", (e) => e.stopPropagation());
+councilMenuDropdown?.addEventListener("click", (e) => e.stopPropagation());
 
 async function submit() {
   const prompt = promptInput.value.trim();
@@ -2729,8 +2756,8 @@ async function loadGems() {
       return;
     }
     maybeMigrateCouncilPortraits();
-    const titleEl = document.getElementById("councilPageTitle");
-    if (titleEl) titleEl.textContent = customCouncilProject.projectTitle || "Your AI Council";
+    const title = customCouncilProject.projectTitle || "Your AI Council";
+    setCouncilPageTitle(title);
     buildPhaseSectionFromProject();
     syncCouncilEssentialQuestionTagline();
     gems = customCouncilProject.members.map((m) => ({
@@ -2746,6 +2773,7 @@ async function loadGems() {
     syncPhaseMilestoneTitle();
     setSubmitState();
     if (viewRubricCouncilBtn) viewRubricCouncilBtn.hidden = false;
+    updateCouncilMenuItems();
     applyCouncilPromptCharLimits();
     applyDailyPromptLimitUi();
     return;
@@ -2780,9 +2808,8 @@ function onPhaseChange() {
   updateRubricCouncilButton();
 }
 
-document.querySelectorAll('input[name="projectPhase"]').forEach((radio) => {
-  radio.addEventListener("change", onPhaseChange);
-});
+initPhaseToggleGroup(document.getElementById("phaseOptions"));
+updateCouncilMenuItems();
 
 uploadBtn.addEventListener("click", () => fileInput.click());
 

@@ -9,20 +9,34 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="creator.css" />
+  <link rel="preload" href="backgrounds/composite1.png" as="image" />
 </head>
 <body class="creator-body home-body">
-  <div class="layout layout-wide">
-    <header class="creator-header">
-      <h1>Stakeholder Council Creator</h1>
+  <header class="council-top-bar home-top-bar" aria-label="Site">
+    <div class="council-top-bar-start">
+      <a href="/home.html" class="council-top-logo">KONSULT</a>
+      <a href="/home.html" class="council-top-home-btn">Home</a>
+    </div>
+    <h1 class="council-top-bar-title" id="homePageTitle">Stakeholder Council Creator</h1>
+    <div class="council-top-bar-end">
+      <span class="council-top-copyright">© Bob Kelly 2026</span>
+    </div>
+  </header>
+  <div class="home-entrance" id="homeEntrance" hidden aria-hidden="true">
+    <img
+      src="backgrounds/composite1.png"
+      alt=""
+      class="home-entrance-composite"
+      width="1200"
+      height="800"
+      decoding="async"
+    />
+  </div>
+  <div class="layout layout-wide home-layout">
+    <header class="creator-header home-intro">
       <p class="tagline">Design a council of AI and human stakeholders for any project-based learning unit. Open an existing council or build a new one.</p>
     </header>
 <br>
-    <section class="home-section">
-      <h2 class="home-section-title">Saved drafts</h2>
-      <ul class="project-list draft-list" id="draftList"></ul>
-      <p class="home-empty home-draft-empty" id="draftEmpty" hidden>No drafts yet. Use Save draft on the create page.</p>
-    </section>
-
     <section class="home-section">
       <h2 class="home-section-title">Your councils</h2>
       <ul class="project-list" id="projectList">
@@ -82,5 +96,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
   <script src="home.js"></script>
+  <script src="konsult-logo.js" defer></script>
 </body>
 </html>

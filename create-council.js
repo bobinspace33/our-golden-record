@@ -56,6 +56,8 @@ const state = {
   ],
   members: [],
   memberCount: 4,
+  /** Human count for ratio slider (0 = all AI, memberCount = all human). Persisted in drafts. */
+  councilHumanCount: 2,
   /** @type {Array<{ id: string, name: string, size: number, mimeType: string, data: string }>} */
   supportingDocuments: [],
   settings: {
@@ -755,6 +757,106 @@ function applyExpertToMember(idx, data) {
   markMemberCardFieldsAiFilled(idx);
 }
 
+function getCouncilMemberCount() {
+  return Math.min(6, Math.max(2, Number(document.getElementById("memberCount")?.value) || state.memberCount || 4));
+}
+
+function getCouncilHumanCount() {
+  const n = getCouncilMemberCount();
+  const slider = document.getElementById("councilRatioSlider");
+  const raw = slider != null ? Number(slider.value) : state.councilHumanCount;
+  const human = Number.isFinite(raw) ? Math.round(raw) : 0;
+  return Math.min(n, Math.max(0, human));
+}
+
+function getCouncilAiCount() {
+  return getCouncilMemberCount() - getCouncilHumanCount();
+}
+
+function updateCouncilRatioSliderUI() {
+  const n = getCouncilMemberCount();
+  const slider = document.getElementById("councilRatioSlider");
+  const fill = document.getElementById("councilRatioFill");
+  const caption = document.getElementById("councilRatioCaption");
+  if (!slider) return;
+  slider.min = "0";
+  slider.max = String(n);
+  let human = getCouncilHumanCount();
+  if (human > n) {
+    human = n;
+    slider.value = String(n);
+  }
+  state.councilHumanCount = human;
+  const ai = n - human;
+  const humanPct = n > 0 ? (human / n) * 100 : 0;
+  if (fill) {
+    fill.style.background = `linear-gradient(to right, #47FF14 0%, #47FF14 ${humanPct}%, #FF4CB2 ${humanPct}%, #FF4CB2 100%)`;
+  }
+  if (caption) caption.textContent = `${human} human · ${ai} AI`;
+  slider.setAttribute("aria-valuemax", String(n));
+  slider.setAttribute("aria-valuenow", String(human));
+  slider.setAttribute("aria-valuetext", `${human} human, ${ai} AI`);
+}
+
+function applySuggestedMembersFromApi(members) {
+  if (!members?.length) return;
+  normalizeMemberPhaseArrays();
+  members.forEach((row, i) => {
+    if (!state.members[i]) return;
+    state.members[i].name = row.name || "";
+    state.members[i].jobTitle = row.jobTitle || "";
+    state.members[i].systemInstruction = row.systemInstruction || "";
+    state.members[i].isHuman = false;
+    state.members[i].localExpert = null;
+    state.members[i].excludedLocalExperts = [];
+    state.members[i].humanContact = {
+      name: "",
+      title: "",
+      organization: "",
+      phone: "",
+      email: "",
+      website: "",
+      emailPromptsToMember: false,
+    };
+    state.members[i].portraitGender = effectivePortraitGender(row.portraitGender, row.name);
+    state.members[i].phasesEnabled = coercePhasesEnabledFromApi(row.phasesEnabled, state.phases.length);
+  });
+  assignStockPortraitsToAiMembers();
+  renderMemberCards();
+  members.forEach((_, i) => {
+    if (state.members[i]) markMemberCardFieldsAiFilled(i);
+  });
+}
+
+async function fetchLocalExpertApiForMember(idx) {
+  const title = document.getElementById("projectTitle")?.value?.trim() || "";
+  const summary = document.getElementById("projectSummary")?.value?.trim() || "";
+  const roleTitle = state.members[idx]?.jobTitle?.trim() || "Community advisor";
+  const excludeExperts = getExcludeListForMember(idx);
+  const res = await fetch("/api/creator/local-expert", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectTitle: title,
+      projectSummary: summary,
+      essentialQuestion: getEssentialQuestion(),
+      roleTitle,
+      excludeExperts,
+      gradeLevel: getGradeLevelFromForm(),
+    }),
+  });
+  const raw = await res.json();
+  if (!res.ok) throw new Error(raw.error || "Request failed");
+  const data = normalizeExpertApi(raw);
+  if (!data.name) throw new Error("Could not parse expert.");
+  return data;
+}
+
+async function fetchAndApplyLocalExpertDirect(idx) {
+  const data = await fetchLocalExpertApiForMember(idx);
+  applyExpertToMember(idx, data);
+}
+
 async function fetchLocalExpertIntoModal(idx, excludeCurrentBeforeFetch) {
   const err = document.getElementById("creatorError");
   try {
@@ -763,26 +865,7 @@ async function fetchLocalExpertIntoModal(idx, excludeCurrentBeforeFetch) {
     }
     setLocalExpertLoadingMessage(!!excludeCurrentBeforeFetch);
     setLocalExpertModalLoading(true);
-    const title = document.getElementById("projectTitle")?.value?.trim() || "";
-    const summary = document.getElementById("projectSummary")?.value?.trim() || "";
-    const roleTitle = state.members[idx]?.jobTitle || "Advisor";
-    const excludeExperts = getExcludeListForMember(idx);
-    const res = await fetch("/api/creator/local-expert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectTitle: title,
-        projectSummary: summary,
-        essentialQuestion: getEssentialQuestion(),
-        roleTitle,
-        excludeExperts,
-        gradeLevel: getGradeLevelFromForm(),
-      }),
-    });
-    const raw = await res.json();
-    if (!res.ok) throw new Error(raw.error || "Request failed");
-    const data = normalizeExpertApi(raw);
-    if (!data.name) throw new Error("Could not parse expert.");
+    const data = await fetchLocalExpertApiForMember(idx);
     localExpertModal.memberIdx = idx;
     localExpertModal.data = data;
     fillLocalExpertModal(data);
@@ -1143,10 +1226,17 @@ async function suggestMembers() {
   const summary = document.getElementById("projectSummary")?.value?.trim() || "";
   const objectives = state.objectives.map((o) => o.trim()).filter(Boolean);
   syncMemberCount();
+  const n = state.memberCount;
+  const aiCount = getCouncilAiCount();
+  const humanCount = n - aiCount;
   setCreatorLoading(
     true,
     "Designing council roles…",
-    "Filling suggested names, titles, and coaching instructions for each member card."
+    humanCount > 0 && aiCount > 0
+      ? "Generating AI members and finding human experts for your mix."
+      : humanCount === n
+        ? "Searching for human community experts for each council seat."
+        : "Filling suggested names, titles, and coaching instructions for each member card."
   );
   try {
     const res = await fetch("/api/creator/suggest-members", {
@@ -1158,40 +1248,34 @@ async function suggestMembers() {
         essentialQuestion: getEssentialQuestion(),
         objectives,
         phases: state.phases,
-        memberCount: state.memberCount,
+        memberCount: n,
         gradeLevel: getGradeLevelFromForm(),
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Request failed");
     if (data.members?.length) {
-      normalizeMemberPhaseArrays();
-      data.members.forEach((row, i) => {
-        if (!state.members[i]) return;
-        state.members[i].name = row.name || "";
-        state.members[i].jobTitle = row.jobTitle || "";
-        state.members[i].systemInstruction = row.systemInstruction || "";
-        state.members[i].isHuman = false;
-        state.members[i].localExpert = null;
-        state.members[i].excludedLocalExperts = [];
-        state.members[i].humanContact = {
-          name: "",
-          title: "",
-          organization: "",
-          phone: "",
-          email: "",
-          website: "",
-          emailPromptsToMember: false,
-        };
-        state.members[i].portraitGender = effectivePortraitGender(row.portraitGender, row.name);
-        state.members[i].phasesEnabled = coercePhasesEnabledFromApi(row.phasesEnabled, state.phases.length);
-      });
-      assignStockPortraitsToAiMembers();
-      renderMemberCards();
-      data.members.forEach((_, i) => {
-        if (state.members[i]) markMemberCardFieldsAiFilled(i);
-      });
+      applySuggestedMembersFromApi(data.members);
     }
+
+    if (humanCount > 0) {
+      for (let i = 0; i < humanCount; i++) {
+        setCreatorLoading(
+          true,
+          `Finding human expert ${i + 1} of ${humanCount}…`,
+          "Matching local contacts to each council role."
+        );
+        await fetchAndApplyLocalExpertDirect(i);
+      }
+    }
+
+    for (let i = humanCount; i < n; i++) {
+      const m = state.members[i];
+      if (!m) continue;
+      m.isHuman = false;
+    }
+    assignStockPortraitsToAiMembers();
+    renderMemberCards();
   } catch (e) {
     err.textContent = e.message || String(e);
     err.hidden = false;
@@ -1526,6 +1610,7 @@ function collectDraftSnapshot() {
     gradeLevel: getGradeLevelFromForm(),
     members: state.members.map((m) => JSON.parse(JSON.stringify(m))),
     memberCount: state.memberCount,
+    councilHumanCount: getCouncilHumanCount(),
     settings: { ...state.settings },
     supportingDocuments: state.supportingDocuments.map((d) => ({
       id: d.id,
@@ -1567,6 +1652,14 @@ function applyDraftSnapshot(snapshot) {
     assignStockPortraitsToAiMembers();
   }
   state.memberCount = Math.min(6, Math.max(2, Number(snapshot.memberCount) || 4));
+  const n = state.memberCount;
+  let human = Math.min(n, Math.max(0, Math.floor(n / 2)));
+  if (Number.isFinite(Number(snapshot.councilHumanCount))) {
+    human = Math.min(n, Math.max(0, Math.round(Number(snapshot.councilHumanCount))));
+  } else if (Number.isFinite(Number(snapshot.councilAiCount))) {
+    human = Math.min(n, Math.max(0, n - Math.round(Number(snapshot.councilAiCount))));
+  }
+  state.councilHumanCount = human;
   state.settings = {
     pacingAlerts: false,
     reflectionLogs: false,
@@ -1614,6 +1707,8 @@ function applyDraftSnapshot(snapshot) {
   if (ps) ps.value = snapshot.projectSummary || "";
   if (eq) eq.value = snapshot.essentialQuestion || "";
   if (mc) mc.value = String(state.memberCount);
+  const ratioSlider = document.getElementById("councilRatioSlider");
+  if (ratioSlider) ratioSlider.value = String(state.councilHumanCount);
 
   renderSupportingFileList();
 
@@ -1622,6 +1717,7 @@ function applyDraftSnapshot(snapshot) {
   renderPhases();
   renderSettings();
   syncMemberCount();
+  updateCouncilRatioSliderUI();
 }
 
 function loadDraftById(id) {
@@ -1942,14 +2038,19 @@ function closePreLaunchModal() {
   if (ov) ov.hidden = true;
 }
 
+function setTeacherMenuOpen(open) {
+  const dropdown = document.getElementById("teacherMenuDropdown");
+  const btn = document.getElementById("teacherMenuBtn");
+  if (dropdown) dropdown.hidden = !open;
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function openTeacherMenuModal() {
-  const ov = document.getElementById("teacherMenuModal");
-  if (ov) ov.hidden = false;
+  setTeacherMenuOpen(true);
 }
 
 function closeTeacherMenuModal() {
-  const ov = document.getElementById("teacherMenuModal");
-  if (ov) ov.hidden = true;
+  setTeacherMenuOpen(false);
 }
 
 async function openTeacherMenuPreLaunch() {
@@ -2187,6 +2288,15 @@ document.getElementById("suggestPhasesBtn")?.addEventListener("click", suggestPh
 document.getElementById("suggestMembersBtn")?.addEventListener("click", suggestMembers);
 document.getElementById("memberCount")?.addEventListener("change", () => {
   syncMemberCount();
+  const n = state.memberCount;
+  const slider = document.getElementById("councilRatioSlider");
+  if (slider && Number(slider.value) > n) slider.value = String(n);
+  state.councilHumanCount = getCouncilHumanCount();
+  updateCouncilRatioSliderUI();
+});
+document.getElementById("councilRatioSlider")?.addEventListener("input", () => {
+  state.councilHumanCount = getCouncilHumanCount();
+  updateCouncilRatioSliderUI();
 });
 document.getElementById("launchCouncilBtn")?.addEventListener("click", () => {
   launchCouncil().catch((e) => {
@@ -2198,10 +2308,14 @@ document.getElementById("launchCouncilBtn")?.addEventListener("click", () => {
   });
 });
 
-document.getElementById("teacherMenuBtn")?.addEventListener("click", () => openTeacherMenuModal());
-document.getElementById("teacherMenuModal")?.addEventListener("click", (e) => {
-  if (e.target.closest("[data-close-tm]")) closeTeacherMenuModal();
+document.getElementById("teacherMenuBtn")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const dropdown = document.getElementById("teacherMenuDropdown");
+  const willOpen = dropdown?.hidden !== false;
+  setTeacherMenuOpen(willOpen);
 });
+document.getElementById("teacherMenuDropdown")?.addEventListener("click", (e) => e.stopPropagation());
+document.body.addEventListener("click", () => setTeacherMenuOpen(false));
 document.getElementById("teacherMenuPreLaunchBtn")?.addEventListener("click", () => {
   openTeacherMenuPreLaunch().catch(() => {});
 });
@@ -2241,8 +2355,8 @@ document.addEventListener("keydown", (e) => {
     closeLocalExpertModal();
     return;
   }
-  const tm = document.getElementById("teacherMenuModal");
-  if (tm && !tm.hidden) {
+  const dropdown = document.getElementById("teacherMenuDropdown");
+  if (dropdown && !dropdown.hidden) {
     closeTeacherMenuModal();
     return;
   }
@@ -2302,6 +2416,7 @@ document.getElementById("supportingFiles")?.addEventListener("change", (e) => {
   renderObjectives();
   renderPhases();
   syncMemberCount();
+  updateCouncilRatioSliderUI();
   renderSettings();
   renderSupportingFileList();
 })();

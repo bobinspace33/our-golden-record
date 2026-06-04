@@ -3,7 +3,9 @@
   const BLACKOUT_REVEAL_MS = 9000;
   /** If buffering is slow, don’t extend black screen indefinitely; fade + play() anyway. */
   const SPLASH_AUDIO_READY_MAX_WAIT_MS = 2800;
-  const EXIT_FADE_MS = 5000;
+  const EXIT_CROSSFADE_MS = 1400;
+  /** Legacy name used for exit navigate + music fade timing. */
+  const EXIT_FADE_MS = EXIT_CROSSFADE_MS;
   /** Fully visible hold after slide-in completes. */
   const MUSIC_CREDIT_HOLD_MS = 5000;
   /** Match `.splash-music-credit` slide-in transition duration. */
@@ -316,6 +318,11 @@
       letters().forEach((el) => {
         el.style.color = "";
       });
+      try {
+        sessionStorage.setItem("konsultFromSplash", "1");
+      } catch {
+        /* ignore */
+      }
       window.location.href = targetHref;
     }, EXIT_FADE_MS);
   }
