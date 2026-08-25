@@ -1042,6 +1042,29 @@ body[data-app="custom"] .upload-btn:hover {
   color: var(--text);
 }
 
+.ai-response-disclaimer {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--accent-soft);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.result-card .ai-response-disclaimer {
+  margin-bottom: 0.75rem;
+}
+
+.response-overlay-card-body > .ai-response-disclaimer {
+  margin-bottom: 1rem;
+}
+
+.response-overlay-followup-item > .ai-response-disclaimer {
+  margin: 0.35rem 0 0.5rem;
+}
+
 .result-card .response-text strong {
   font-weight: 700;
 }
