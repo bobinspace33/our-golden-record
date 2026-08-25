@@ -55,7 +55,22 @@
   <div class="layout layout-wide">
 
     <form id="creatorForm" class="creator-form" onsubmit="return false;">
-      <section class="creator-block">
+      <div class="creator-wizard">
+        <nav class="creator-step-progress" aria-label="Creator progress">
+          <ol class="creator-step-dots" id="creatorStepDots">
+            <li class="creator-step-dot creator-step-dot--active" data-step="1"><span>1</span></li>
+            <li class="creator-step-dot" data-step="2"><span>2</span></li>
+            <li class="creator-step-dot" data-step="3"><span>3</span></li>
+            <li class="creator-step-dot" data-step="4"><span>4</span></li>
+            <li class="creator-step-dot" data-step="5"><span>5</span></li>
+            <li class="creator-step-dot" data-step="6"><span>6</span></li>
+            <li class="creator-step-dot" data-step="7"><span>7</span></li>
+          </ol>
+          <p class="creator-step-counter" id="creatorStepCounter" aria-live="polite">Step 1 of 7 — Project brief</p>
+        </nav>
+
+        <div class="creator-step-container">
+      <section class="creator-block creator-step creator-step--active" data-creator-step="1">
         <h2 class="creator-block-title">
           1. Project brief —
           <span class="creator-start-here">START HERE!</span><span class="creator-start-arrow" aria-hidden="true">&lt;</span>
@@ -77,7 +92,7 @@
         </fieldset>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="2" hidden>
         <h2 class="creator-block-title">2. Essential question</h2>
         <p class="creator-hint">
           The driving question that frames the unit or project. Uploading a project brief can fill this automatically.
@@ -91,7 +106,7 @@
         ></textarea>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="3" hidden>
         <h2 class="creator-block-title">3. Supporting documents (Optional)</h2>
         <p class="creator-hint">
           Standards, rubrics, or additional context.
@@ -101,14 +116,14 @@
         <ul class="creator-file-list supporting-file-list" id="supportingFileList"></ul>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="4" hidden>
         <h2 class="creator-block-title">4. Learning objectives</h2>
         <p class="creator-hint">2–4 objectives recommended. Uploading a project brief can auto-fill objectives.</p>
         <div id="objectivesList" class="objectives-list"></div>
         <button type="button" class="btn-add-row" id="addObjectiveBtn">+ Add objective</button>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="5" hidden>
         <h2 class="creator-block-title">5. Project phases</h2>
         <div class="creator-toolbar">
           <button type="button" class="btn-cta-green" id="suggestPhasesBtn">Suggest phases from summary</button>
@@ -117,7 +132,7 @@
         <button type="button" class="btn-add-row" id="addPhaseBtn">+ Add phase row</button>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="6" hidden>
         <h2 class="creator-block-title">6. Council members</h2>
         <p class="creator-hint">Recommended one member per project phase. Click Globe icon to search for a local expert.</p>
         <div class="creator-members-toolbar">
@@ -161,19 +176,26 @@
         <div id="memberCards" class="member-cards"></div>
       </section>
 
-      <section class="creator-block">
+      <section class="creator-block creator-step" data-creator-step="7" hidden>
         <h2 class="creator-block-title">7. Project settings</h2>
         <p class="creator-hint">More options will be added later.</p>
         <div class="settings-grid" id="settingsGrid"></div>
-      </section>
 
-      <div class="creator-launch-wrap">
-        <div class="creator-draft-toolbar">
-          <button type="button" class="btn-secondary" id="saveDraftBtn">Save draft</button>
-          <p class="draft-status" id="draftStatus" aria-live="polite"></p>
+        <div class="creator-launch-wrap">
+          <div class="creator-draft-toolbar">
+            <button type="button" class="btn-secondary" id="saveDraftBtn">Save draft</button>
+            <p class="draft-status" id="draftStatus" aria-live="polite"></p>
+          </div>
+          <button type="button" class="btn-launch-council" id="launchCouncilBtn">Launch Council</button>
         </div>
-        <button type="button" class="btn-launch-council" id="launchCouncilBtn">Launch Council</button>
-        <p class="creator-error" id="creatorError" hidden></p>
+      </section>
+        </div>
+
+        <footer class="creator-step-nav">
+          <button type="button" class="btn-secondary creator-step-back" id="creatorStepBack" hidden>Back</button>
+          <button type="button" class="btn-cta-green creator-step-next" id="creatorStepNext">Next</button>
+        </footer>
+        <p class="creator-error creator-step-error" id="creatorError" hidden></p>
       </div>
     </form>
   </div>

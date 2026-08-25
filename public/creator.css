@@ -529,6 +529,122 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Step-by-step creator wizard */
+.creator-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.creator-step-progress {
+  margin-bottom: 1.75rem;
+  text-align: center;
+}
+
+.creator-step-dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  list-style: none;
+}
+
+.creator-step-dot {
+  flex-shrink: 0;
+}
+
+.creator-step-dot span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.creator-step-dot--active span {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.creator-step-dot--done span {
+  border-color: var(--success);
+  background: rgba(52, 199, 89, 0.12);
+  color: var(--success);
+}
+
+.creator-step-counter {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.creator-step-container {
+  min-height: 18rem;
+}
+
+.creator-wizard .creator-step {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.creator-step-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.creator-step-back {
+  min-width: 6rem;
+}
+
+.creator-step-next {
+  margin-left: auto;
+  min-width: 6rem;
+}
+
+.creator-step-error {
+  margin: 0.75rem 0 0;
+  text-align: center;
+}
+
+.creator-wizard .creator-launch-wrap {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 520px) {
+  .creator-step-dots {
+    gap: 0.3rem;
+  }
+
+  .creator-step-dot span {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.68rem;
+  }
+
+  .creator-step-counter {
+    font-size: 0.82rem;
+  }
+}
+
 .creator-block-title {
   margin: 0 0 0.75rem;
   font-size: 1rem;

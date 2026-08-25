@@ -2234,23 +2234,23 @@ async function runCouncilLaunchPipeline(id, title, err) {
 
 async function launchCouncil() {
   const err = document.getElementById("creatorError");
-  err.hidden = true;
+  showCreatorStepError("");
   const title = document.getElementById("projectTitle")?.value?.trim();
   if (!title) {
-    err.textContent = "Enter a project title.";
-    err.hidden = false;
+    showCreatorStepError("Enter a project title.");
+    setCreatorStep(1, { skipValidation: true });
     return;
   }
   syncMemberCount();
   const filled = state.members.filter((m) => (m.name || "").trim().length > 0);
   if (filled.length < 2) {
-    err.textContent = "Add at least two council members with names (use Generate roles or type manually).";
-    err.hidden = false;
+    showCreatorStepError("Add at least two council members with names (use Generate roles or type manually).");
+    setCreatorStep(6, { skipValidation: true });
     return;
   }
   if (!state.phases.some((p) => (p.title || "").trim())) {
-    err.textContent = "Add at least one phase title (or use Suggest phases).";
-    err.hidden = false;
+    showCreatorStepError("Add at least one phase title (or use Suggest phases).");
+    setCreatorStep(5, { skipValidation: true });
     return;
   }
 
@@ -2285,6 +2285,107 @@ async function continueCouncilLaunchAfterReflection() {
   pendingCouncilLaunchContext = null;
   if (!pending?.title || !pending?.id) return;
   await runCouncilLaunchPipeline(pending.id, pending.title, err);
+}
+
+const CREATOR_STEP_COUNT = 7;
+const CREATOR_STEP_LABELS = [
+  "Project brief",
+  "Essential question",
+  "Supporting documents",
+  "Learning objectives",
+  "Project phases",
+  "Council members",
+  "Project settings",
+];
+let creatorCurrentStep = 1;
+
+function showCreatorStepError(message) {
+  const err = document.getElementById("creatorError");
+  if (!err) return;
+  if (message) {
+    err.textContent = message;
+    err.hidden = false;
+  } else {
+    err.hidden = true;
+  }
+}
+
+function validateCreatorStep(step) {
+  showCreatorStepError("");
+  if (step === 1) {
+    const title = document.getElementById("projectTitle")?.value?.trim();
+    if (!title) {
+      showCreatorStepError("Enter a project title before continuing.");
+      document.getElementById("projectTitle")?.focus();
+      return false;
+    }
+  }
+  return true;
+}
+
+function syncCreatorStepFields(step) {
+  if (step === 4) syncObjectivesFromDom();
+}
+
+function updateCreatorStepUi() {
+  const n = creatorCurrentStep;
+  document.querySelectorAll(".creator-step").forEach((el) => {
+    const step = Number(el.dataset.creatorStep);
+    const active = step === n;
+    el.classList.toggle("creator-step--active", active);
+    el.hidden = !active;
+  });
+
+  document.querySelectorAll(".creator-step-dot").forEach((dot) => {
+    const step = Number(dot.dataset.step);
+    dot.classList.toggle("creator-step-dot--active", step === n);
+    dot.classList.toggle("creator-step-dot--done", step < n);
+  });
+
+  const counter = document.getElementById("creatorStepCounter");
+  if (counter) {
+    counter.textContent = `Step ${n} of ${CREATOR_STEP_COUNT} — ${CREATOR_STEP_LABELS[n - 1]}`;
+  }
+
+  const back = document.getElementById("creatorStepBack");
+  const next = document.getElementById("creatorStepNext");
+  if (back) back.hidden = n <= 1;
+  if (next) next.hidden = n >= CREATOR_STEP_COUNT;
+}
+
+function setCreatorStep(step, opts = {}) {
+  const target = Math.min(CREATOR_STEP_COUNT, Math.max(1, Math.floor(Number(step) || 1)));
+  const forward = target > creatorCurrentStep;
+
+  if (forward && !opts.skipValidation) {
+    for (let s = creatorCurrentStep; s < target; s++) {
+      if (!validateCreatorStep(s)) {
+        updateCreatorStepUi();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+      syncCreatorStepFields(s);
+    }
+  }
+
+  if (target < creatorCurrentStep) {
+    syncCreatorStepFields(creatorCurrentStep);
+    showCreatorStepError("");
+  }
+
+  creatorCurrentStep = target;
+  updateCreatorStepUi();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function initCreatorWizard() {
+  document.getElementById("creatorStepBack")?.addEventListener("click", () => {
+    setCreatorStep(creatorCurrentStep - 1, { skipValidation: true });
+  });
+  document.getElementById("creatorStepNext")?.addEventListener("click", () => {
+    setCreatorStep(creatorCurrentStep + 1);
+  });
+  setCreatorStep(1, { skipValidation: true });
 }
 
 document.getElementById("addObjectiveBtn")?.addEventListener("click", () => {
@@ -2425,12 +2526,13 @@ document.getElementById("supportingFiles")?.addEventListener("change", (e) => {
     if (status) {
       status.textContent = "Draft loaded. Continue editing, save again, or launch when ready.";
     }
-    return;
+  } else {
+    renderObjectives();
+    renderPhases();
+    syncMemberCount();
+    updateCouncilRatioSliderUI();
+    renderSettings();
+    renderSupportingFileList();
   }
-  renderObjectives();
-  renderPhases();
-  syncMemberCount();
-  updateCouncilRatioSliderUI();
-  renderSettings();
-  renderSupportingFileList();
+  initCreatorWizard();
 })();
